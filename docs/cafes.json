@@ -1,10 +1,17 @@
 {
   "loja": "Torra & Terra",
   "fonte": "https://nivaldo.felipefurlan.com.br",
+  "coletado_em": "2026-09-09",
+  "moedas": "BRL",
   "moagens_validas": [
     "GRAO",
     "MEDIA",
     "FINA"
+  ],
+  "torras_validas": [
+    "CLARA",
+    "MEDIA",
+    "ESCURA"
   ],
   "total": 12,
   "cafes": [
@@ -91,7 +98,7 @@
       "nome": "Fazenda Serra Negra",
       "descricao": "Bourbon amarelo cultivado a 1.100 m, colhido em derriça seletiva e secado em terreiro suspenso. Um cafe de corpo redondo para quem gosta de espresso doce.",
       "preco_reais": 62,
-      "estoque": 40,
+      "estoque": 39,
       "torra": "MEDIA",
       "nota_sensorial": "Castanha-do-para, chocolate ao leite, caramelo",
       "pontuacao_sca": 84.5,
