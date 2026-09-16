@@ -1,5 +1,6 @@
 # Segredos — o motivo principal deste arquivo existir
 .env
+.env*.local
 
 # Python
 __pycache__/
@@ -12,19 +13,17 @@ venv/
 .pytest_cache/
 .coverage
 
-# Backups locais do banco
-*.sql.bak
-backup*.sql
+# Vercel CLI: liga a pasta local a um projeto da conta
+.vercel/
+
+# Exportações locais do banco
+backup*.json
 
 # Editores e SO
 .vscode/
 .idea/
 Thumbs.db
 desktop.ini
-
-# Node — usado so para gerar o deck com pptxgenjs
-node_modules/
-package-lock.json
 
 # arquivos de bloqueio do Office
 ~$*

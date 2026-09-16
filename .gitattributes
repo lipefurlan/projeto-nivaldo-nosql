@@ -1,8 +1,13 @@
-# O Railway roda Linux. Procfile com CRLF quebra o boot do gunicorn.
+# O Vercel e o GitHub Actions rodam Linux: fim de linha LF em todo texto.
+# A validate_doc_update é comparada byte a byte no init-db — com CRLF vindo
+# do Windows, ela pareceria diferente a cada máquina.
 * text=auto eol=lf
-Procfile text eol=lf
-*.py      text eol=lf
-*.sql     text eol=lf
-*.html    text eol=lf
-*.css     text eol=lf
-*.md      text eol=lf
+*.py   text eol=lf
+*.js   text eol=lf
+*.json text eol=lf
+*.html text eol=lf
+*.css  text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+*.ini  text eol=lf
+*.txt  text eol=lf

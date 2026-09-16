@@ -1,0 +1,8 @@
+# Fica no GitHub, mas não entra na função Python do Vercel.
+.venv/
+.github/
+tests/
+docs/
+docker-compose.yml
+pytest.ini
+requirements-dev.txt
