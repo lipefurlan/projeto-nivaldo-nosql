@@ -55,13 +55,10 @@ function (novo, antigo, usuario) {
     'tipo desconhecido: ' + novo.tipo);
 
   // O tipo é o prefixo do _id. É o que permite listar uma família inteira de
-  // documentos pelo índice primário, sem índice secundário.
+  // documentos pelo índice primário, sem índice secundário. E como o _id de
+  // um documento nunca muda, esta regra também impede que ele troque de tipo.
   exigir(comecaCom(novo._id, novo.tipo + ':'),
     'o _id de um documento ' + novo.tipo + ' precisa começar com "' + novo.tipo + ':"');
-
-  if (antigo && !antigo._deleted) {
-    exigir(antigo.tipo === novo.tipo, 'o tipo de um documento não muda');
-  }
 
   // --- categoria (região produtora) ----------------------------------
   if (novo.tipo === 'categoria') {
