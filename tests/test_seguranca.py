@@ -133,12 +133,16 @@ def test_producao_sem_segredos_responde_503_dizendo_o_que_falta(monkeypatch):
     monkeypatch.delenv("SECRET_KEY", raising=False)
     monkeypatch.delenv("COUCHDB_URL", raising=False)
 
-    resposta = criar_app().test_client().get("/produto/chapada-geisha")
+    navegador = criar_app().test_client()
+    resposta = navegador.get("/produto/chapada-geisha")
 
     assert resposta.status_code == 503
     texto = resposta.get_data(as_text=True)
     assert "SECRET_KEY" in texto
     assert "COUCHDB_URL" in texto
+
+    # A apresentação não depende de banco nem de sessão: continua no ar.
+    assert navegador.get("/apresentacao").status_code == 200
 
 
 def test_producao_com_couchdb_url_mal_colada_nao_mostra_o_valor(monkeypatch):

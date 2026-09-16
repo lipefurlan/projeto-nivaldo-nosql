@@ -143,14 +143,19 @@ def app_sem_configuracao(problema: str) -> Flask:
     do que falta — nunca um valor, que pode carregar a senha do banco — e a
     loja continua sem atender ninguém até a configuração ser feita.
     """
-    aplicacao = Flask(__name__)
+    aplicacao = Flask(__name__, static_folder="public/static", static_url_path="/static")
     mensagem = (
         f"Torra & Terra: a loja está sem configuração — {problema}.\n"
         "No Vercel: Settings > Environment Variables, e depois Redeploy.\n"
     )
     log.error(mensagem.strip())
 
-    @aplicacao.route("/", defaults={"caminho": ""})
+    # A apresentação não usa banco nem sessão: continua no ar mesmo com a loja
+    # parada, para o trabalho poder ser mostrado enquanto o banco é configurado.
+    registrar_filtros_de_texto(aplicacao)
+    aplicacao.add_url_rule("/apresentacao", "apresentacao", renderizar_apresentacao)
+
+    @aplicacao.route("/", endpoint="catalogo", defaults={"caminho": ""})
     @aplicacao.route("/<path:caminho>")
     def configuracao_incompleta(caminho: str):
         return mensagem, 503, {"Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store"}
@@ -342,6 +347,21 @@ def texto_rico(texto: str, classe_destaque: str | None = None) -> Markup:
 
 def carregar_apresentacao() -> dict:
     return json.loads((RAIZ / "templates" / "apresentacao.json").read_text(encoding="utf-8"))
+
+
+def registrar_filtros_de_texto(app: Flask) -> None:
+    app.jinja_env.filters["rico"] = texto_rico
+    app.jinja_env.filters["codigo"] = lambda linha: texto_rico(linha, "ap-codigo-destaque")
+
+
+def renderizar_apresentacao():
+    deck = carregar_apresentacao()
+    return render_template(
+        "apresentacao.html",
+        deck=deck,
+        slides={slide["chave"]: slide for slide in deck["slides"]},
+        total=len(deck["slides"]),
+    )
 
 
 # =====================================================================
@@ -1010,8 +1030,7 @@ def registrar_rotas(app: Flask) -> None:
     app.jinja_env.filters["data_brasilia"] = data_brasilia
     app.jinja_env.filters["sca"] = lambda valor: f"{valor:.2f}"
     app.jinja_env.filters["status"] = lambda valor: ROTULOS_STATUS.get(valor, valor.lower())
-    app.jinja_env.filters["rico"] = texto_rico
-    app.jinja_env.filters["codigo"] = lambda linha: texto_rico(linha, "ap-codigo-destaque")
+    registrar_filtros_de_texto(app)
     app.jinja_env.globals["token_csrf"] = token_csrf
 
     @app.before_request
@@ -1096,15 +1115,7 @@ def registrar_rotas(app: Flask) -> None:
     # própria aplicação, num endereço fácil de compartilhar. Sem JavaScript,
     # como o resto do site — a navegação entre os slides é o próprio scroll.
     # -----------------------------------------------------------------
-    @app.route("/apresentacao")
-    def apresentacao():
-        deck = carregar_apresentacao()
-        return render_template(
-            "apresentacao.html",
-            deck=deck,
-            slides={slide["chave"]: slide for slide in deck["slides"]},
-            total=len(deck["slides"]),
-        )
+    app.add_url_rule("/apresentacao", "apresentacao", renderizar_apresentacao)
 
     # -----------------------------------------------------------------
     # RF01 — Catálogo
