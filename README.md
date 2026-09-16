@@ -213,7 +213,7 @@ O que está coberto:
 ├── FAUXTON_ROTEIRO.md      roteiro de evidências no Fauxton
 ├── .github/workflows/      pytest contra CouchDB real a cada push
 └── docs/
-    ├── atividades/                 Atividades 3 e 3.2 do grupo, em PDF
+    ├── atividades/                 Atividades 3, 3.2 e 3.3 do grupo, em PDF
     ├── requisitos.md               RF, RNF, por que NoSQL, consultas antes do modelo
     ├── modelo_documental.md        documentos, embed x reference, onde foram as constraints
     ├── consultas_e_indices.md      catálogo de consultas e estratégia de índices
@@ -264,7 +264,12 @@ As questões dissertativas entregues pelo Grupo 3, em PDF no padrão ABNT:
 - [Atividade 3.2](docs/atividades/Atividade_3.2Grupo3.pdf) — o projeto prático
   com Apache CouchDB: por que CouchDB, documento e tabela, embed e reference,
   `_id`, `_rev` e `tipo`, Mango e índices, `_bulk_docs`, o 409, compensação
-  no checkout, replicação e segurança na nuvem.
+  no checkout, replicação e segurança na nuvem;
+- [Atividade 3.3](docs/atividades/Atividade_3.3Grupo3.pdf) — os projetos SQL
+  e NoSQL lado a lado: normalização e agregação, consistência no checkout,
+  evolução do catálogo, escala em pico de demanda, relatórios, duplicação de
+  dados, o mesmo hardware com bancos diferentes, falhas e CAP, persistência
+  poliglota e a decisão para 10 milhões de usuários.
 
 ---
 
