@@ -115,7 +115,7 @@ Minimalismo quente e editorial. Muito espaço em branco, blocos modulares, hiera
 
 ├── .github/workflows/testes.yml
 
-└── docs/{requisitos,modelo_documental,consultas_e_indices,checkout_saga,comparacao_relacional_nosql,decisoes,deploy_vercel,plano_nosql}.md · docs/apresentacao/ (gerador do .pptx)
+└── docs/{requisitos,modelo_documental,consultas_e_indices,checkout_saga,comparacao_relacional_nosql,decisoes,deploy_vercel,plano_nosql}.md · docs/apresentacao/ (gerador do .pptx) · docs/atividades/ (Atividades 3 e 3.2 do grupo, em PDF)
 
 ## Ambiente
 

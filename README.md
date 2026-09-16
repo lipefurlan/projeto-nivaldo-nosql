@@ -213,6 +213,7 @@ O que está coberto:
 ├── FAUXTON_ROTEIRO.md      roteiro de evidências no Fauxton
 ├── .github/workflows/      pytest contra CouchDB real a cada push
 └── docs/
+    ├── atividades/                 Atividades 3 e 3.2 do grupo, em PDF
     ├── requisitos.md               RF, RNF, por que NoSQL, consultas antes do modelo
     ├── modelo_documental.md        documentos, embed x reference, onde foram as constraints
     ├── consultas_e_indices.md      catálogo de consultas e estratégia de índices
@@ -249,6 +250,21 @@ CSS, sem JavaScript, um slide por tela. Os mesmos 12 slides saem em
 apresentador, e em [PDF](public/static/Torra_e_Terra_NoSQL.pdf). O texto de
 todos os formatos mora num arquivo só, `templates/apresentacao.json`; como
 gerar de novo está em [`docs/apresentacao/README.md`](docs/apresentacao/README.md).
+
+---
+
+## Atividades da disciplina
+
+As questões dissertativas entregues pelo Grupo 3, em PDF no padrão ABNT:
+
+- [Atividade 3](docs/atividades/Atividade_3-Grupo3.pdf) — bancos NoSQL em
+  geral: modelagem orientada à consulta, documentos e chave-valor, partition
+  key, grafos, séries temporais, índice invertido, embeddings, riscos de
+  operação, monitoramento e arquitetura polyglot;
+- [Atividade 3.2](docs/atividades/Atividade_3.2Grupo3.pdf) — o projeto prático
+  com Apache CouchDB: por que CouchDB, documento e tabela, embed e reference,
+  `_id`, `_rev` e `tipo`, Mango e índices, `_bulk_docs`, o 409, compensação
+  no checkout, replicação e segurança na nuvem.
 
 ---
 
