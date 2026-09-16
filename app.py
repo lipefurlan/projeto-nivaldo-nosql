@@ -29,6 +29,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from functools import wraps
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import click
 from dotenv import load_dotenv
@@ -107,11 +108,17 @@ def criar_app(config_teste: dict | None = None) -> Flask:
     if producao:
         faltando = [nome for nome in ("SECRET_KEY", "COUCHDB_URL") if not app.config[nome]]
         if faltando:
-            raise RuntimeError(
-                "Variáveis de ambiente obrigatórias ausentes: " + ", ".join(faltando)
-            )
+            return app_sem_configuracao("faltam as variáveis de ambiente " + " e ".join(faltando))
     app.config["SECRET_KEY"] = app.config["SECRET_KEY"] or "dev-inseguro-trocar"
     app.config["COUCHDB_URL"] = app.config["COUCHDB_URL"] or "http://admin:admin@127.0.0.1:5984"
+
+    try:
+        partes = urlsplit(app.config["COUCHDB_URL"])
+        url_valida = partes.scheme in ("http", "https") and bool(partes.hostname) and (partes.port or True)
+    except ValueError:  # porta que não é número, por exemplo
+        url_valida = False
+    if not url_valida:
+        return app_sem_configuracao("a COUCHDB_URL não é um endereço http(s) completo")
 
     app.extensions["couchdb"] = CouchDB(
         app.config["COUCHDB_URL"],
@@ -126,6 +133,29 @@ def criar_app(config_teste: dict | None = None) -> Flask:
     registrar_comandos(app)
     registrar_rotas(app)
     return app
+
+
+def app_sem_configuracao(problema: str) -> Flask:
+    """Aplicação mínima que só explica o que falta configurar.
+
+    Levantar exceção no import derrubaria a função, e o Vercel mostraria só
+    FUNCTION_INVOCATION_FAILED, sem pista nenhuma. Esta resposta diz o NOME
+    do que falta — nunca um valor, que pode carregar a senha do banco — e a
+    loja continua sem atender ninguém até a configuração ser feita.
+    """
+    aplicacao = Flask(__name__)
+    mensagem = (
+        f"Torra & Terra: a loja está sem configuração — {problema}.\n"
+        "No Vercel: Settings > Environment Variables, e depois Redeploy.\n"
+    )
+    log.error(mensagem.strip())
+
+    @aplicacao.route("/", defaults={"caminho": ""})
+    @aplicacao.route("/<path:caminho>")
+    def configuracao_incompleta(caminho: str):
+        return mensagem, 503, {"Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store"}
+
+    return aplicacao
 
 
 def banco() -> CouchDB:

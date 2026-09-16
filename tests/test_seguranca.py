@@ -125,6 +125,36 @@ def test_pagina_de_cliente_logado_nao_vai_para_cache(navegador):
     assert navegador.get("/").headers.get("Cache-Control") == "no-store"
 
 
+def test_producao_sem_segredos_responde_503_dizendo_o_que_falta(monkeypatch):
+    """Sem SECRET_KEY a loja não atende — mas diz por quê, em vez de derrubar a função."""
+    from app import criar_app
+
+    monkeypatch.setenv("VERCEL", "1")
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    monkeypatch.delenv("COUCHDB_URL", raising=False)
+
+    resposta = criar_app().test_client().get("/produto/chapada-geisha")
+
+    assert resposta.status_code == 503
+    texto = resposta.get_data(as_text=True)
+    assert "SECRET_KEY" in texto
+    assert "COUCHDB_URL" in texto
+
+
+def test_producao_com_couchdb_url_mal_colada_nao_mostra_o_valor(monkeypatch):
+    from app import criar_app
+
+    monkeypatch.setenv("VERCEL", "1")
+    monkeypatch.setenv("SECRET_KEY", "chave-de-teste-com-tamanho-suficiente")
+    monkeypatch.setenv("COUCHDB_URL", "usuario:senha-secreta@servidor-sem-https")
+
+    resposta = criar_app().test_client().get("/")
+
+    assert resposta.status_code == 503
+    assert "COUCHDB_URL" in resposta.get_data(as_text=True)
+    assert "senha-secreta" not in resposta.get_data(as_text=True)
+
+
 def test_redirecionamento_pos_login_so_aceita_destino_interno(navegador):
     cadastrar(navegador, "destino@exemplo.com")
     navegador.get("/sair")
