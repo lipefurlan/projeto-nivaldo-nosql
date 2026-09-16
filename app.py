@@ -1198,10 +1198,11 @@ def registrar_rotas(app: Flask) -> None:
         b = banco()
         pedidos = b.buscar(consulta_pedidos_do_cliente(session["cliente_id"]))
 
-        # Ler a própria escrita. Os índices globais do Cloudant são
-        # eventualmente consistentes: logo depois do checkout, o pedido novo
-        # pode ainda não aparecer na consulta. O GET pelo _id não tem esse
-        # atraso, então o último pedido entra garantido por fora do índice.
+        # Ler a própria escrita. O Cloudant é um cluster eventualmente
+        # consistente: a consulta ao índice pode ser respondida por uma cópia
+        # que ainda não recebeu a gravação, e o pedido recém-feito sumiria da
+        # tela por um instante. O GET pelo _id lê por quórum e vai direto ao
+        # documento, então o último pedido entra garantido por fora do índice.
         ultimo = session.get("ultimo_pedido")
         if ultimo and all(p["_id"] != ultimo for p in pedidos):
             doc = b.obter_ou_none(ultimo)

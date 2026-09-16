@@ -1,5 +1,21 @@
 # Plano — Projeto NoSQL com CouchDB
 
+> **Atualização de 16/09/2026 — plano executado.** Este documento foi escrito
+> antes da migração e fica como registro. As decisões da seção 5 foram
+> tomadas assim:
+>
+> 1. **Repositório novo**, copiado do relacional com todo o histórico; o
+>    estado PostgreSQL ficou na tag `v1-relacional`.
+> 2. **Tema café mantido.**
+> 3. **Sem Docker nesta máquina:** os testes rodam contra um dublê em memória
+>    localmente e contra o Apache CouchDB 3.5 de verdade no GitHub Actions. O
+>    `docker-compose.yml` continua no projeto para quem tem Docker.
+> 4. **Deploy no Vercel + IBM Cloudant**, saindo do Railway por custo.
+>
+> A seção 2.2 virou o centro do trabalho: a saga do checkout, com marcas de
+> reserva e compensação, está em `docs/checkout_saga.md`. As justificativas
+> estão em `docs/decisoes.md`.
+
 Segundo projeto da disciplina: **CouchCommerce**, o mesmo e-commerce, agora
 sobre um banco de documentos. O objetivo declarado no material é
 *"comparar na prática o ciclo de desenvolvimento de uma aplicação NoSQL com o

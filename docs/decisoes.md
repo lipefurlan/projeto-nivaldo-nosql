@@ -1,187 +1,149 @@
-# Decisões de projeto
+# Decisões de projeto — versão NoSQL
 
 Registro das escolhas que fogem do óbvio ou do material da disciplina, com a
 justificativa. Serve para a defesa oral: toda decisão aqui tem um "por quê".
 
----
-
-## D01 — Deploy no Railway em vez de Render + Neon
-
-**O material recomenda** (Bloco 6, slides 38, 39 e 45): GitHub para
-versionamento, **Render** para a aplicação e **Neon/Supabase** para o PostgreSQL.
-
-**Escolhemos o Railway.** Motivos:
-
-1. O critério de avaliação do slide 42 é agnóstico de ferramenta — diz apenas
-   *"se a solução está publicada e utilizável"*. O que é avaliado é o resultado.
-2. Já existe plano Hobby ativo na conta, então não há custo adicional.
-3. O Railway hospeda **aplicação e banco no mesmo projeto**, com
-   *reference variable* (`${{Postgres.DATABASE_URL}}`) ligando os dois. No
-   Render + Neon a string de conexão é copiada à mão entre dois provedores — mais
-   passos e mais chance de erro.
-4. Domínio próprio já disponível: `nivaldo.felipefurlan.com.br`.
-
-**O que não muda:** GitHub como versionamento, `Procfile` com gunicorn,
-`DATABASE_URL` e `SECRET_KEY` por variável de ambiente, deploy automático a cada
-push. A arquitetura de deploy é a mesma que o material descreve; só o provedor é
-outro.
-
-**Plano B.** Se for exigida a ferramenta do material, a migração é barata: o
-Render lê o mesmo `Procfile`, e o Neon entrega uma `DATABASE_URL` no mesmo
-formato `postgresql://` — que o `app.py` já normaliza para
-`postgresql+psycopg://`. Nenhuma linha de código muda.
+As decisões do projeto relacional (D01 a D08) estão em
+`docs/decisoes.md` na tag `v1-relacional`. As desta versão usam o prefixo **N**.
 
 ---
 
-## D02 — `moagem` mora em `itens_pedido`, não em `produtos`
+## N01 — CouchDB, e não MongoDB
 
-O cliente escolhe a moagem **na hora da compra**. O mesmo café pode ser vendido
-em grão para um cliente e moído fino para outro, no mesmo dia.
-
-Se `moagem` fosse coluna de `produtos`, o mesmo café precisaria virar três
-registros diferentes — triplicando o cadastro e quebrando o controle de estoque,
-que é do café e não da moagem.
-
-É esse atributo que faz `itens_pedido` ser **entidade** e não tabela de ligação:
-ela tem dados próprios que não pertencem nem ao pedido nem ao produto.
+A aula teórica de NoSQL usa o MongoDB como exemplo de banco de documentos, mas
+o **projeto prático** é explícito: "e-commerce com Apache CouchDB". Os
+critérios de avaliação pesam "CouchDB/índices" em 20%, e as entregas pedem
+Fauxton, `_rev`, Mango e teste de conflito — tudo específico do CouchDB.
 
 ---
 
-## D03 — `preco_unitario` é congelado no item
+## N02 — Vercel + IBM Cloudant, no lugar do Railway
 
-O preço do café muda: safra nova, câmbio, reajuste. Se o pedido antigo lesse o
-preço de `produtos`, o histórico se reescreveria sozinho e o total do pedido
-deixaria de bater com a soma dos itens.
+**Motivo:** custo. O Railway cobra por uso, e manter a aplicação e mais um
+banco rodando passou a pesar.
 
-Gravar o preço no item é **desnormalização deliberada**: aceita-se a redundância
-porque o dado tem significado temporal — é "o preço naquele momento", não "o
-preço do produto". Responde diretamente ao teste mental do slide 16:
-*"o que acontece se o produto mudar de preço? Onde o histórico deve ficar?"*
+- O slide 48 lista para o Flask "Render/Railway/Fly/VM — verificar cota
+  vigente". O Vercel ocupa o mesmo papel e roda Flask sem configuração.
+- Para o banco, o mesmo slide cita o **IBM Cloudant** como opção compatível.
+  O plano Lite é gratuito e não expira.
+- O Vercel não hospeda banco nenhum; um CouchDB próprio exigiria uma VM. O
+  Cloudant resolve sem operação.
+- A função do Vercel (Washington, D.C.) e o Cloudant (Washington DC) ficam na
+  mesma região.
 
----
+**Custos aceitos.** A conta da IBM exige cartão para verificação. O plano Lite
+limita a vazão (10 escritas/s, 5 consultas/s), e por isso o `banco.py` trata o
+HTTP 429. Uma função serverless pode morrer entre duas gravações, e por isso
+existe a reconciliação.
 
-## D04 — Carrinho na sessão, não no banco
-
-Recomendação explícita do material (slide 17): *"diferencie entidade de processo:
-carrinho pode ser sessão no MVP, não necessariamente tabela"*.
-
-O carrinho é **processo**, não entidade: existe só enquanto a compra não fecha e
-não tem valor histórico. Vira entidade (`pedidos` + `itens_pedido`) no instante
-do checkout.
-
-**Limitação aceita:** o carrinho não sobrevive à troca de dispositivo. É
-exatamente o cenário em que um Redis passaria a fazer sentido — resposta pronta
-para a pergunta 4 do slide 47.
+**Plano B.** Um CouchDB em container (numa VM ou no próprio Railway) fala a
+mesma API: basta trocar o `COUCHDB_URL`. Nenhuma linha de código muda.
 
 ---
 
-## D05 — Constraints no banco, não só na aplicação
+## N03 — Repositório novo, com o histórico do relacional
 
-O material insiste nisso em três lugares (slides 21, 24 e 48). A validação do
-formulário protege a experiência do usuário; a constraint protege o **dado**.
+A comparação entre os dois projetos é metade do objetivo do material. Copiar o
+repositório preserva o histórico inteiro, com a autoria do grupo, e a tag
+`v1-relacional` marca o último estado PostgreSQL. A versão NoSQL começa
+logo depois, e o `git log` conta a migração passo a passo.
 
-O exemplo mais claro é `pontuacao_sca BETWEEN 80 AND 100`: café especial, pela
-definição da SCA, pontua 80 ou mais. É regra do negócio, não do formulário. Se
-amanhã alguém inserir um produto por um script, por um `INSERT` manual ou por
-uma futura API, a regra continua valendo.
-
-Por isso o `SQL/schema.sql` é **DDL escrito à mão**, nunca gerado por
-`db.create_all()`: as constraints precisam estar visíveis em SQL, não escondidas
-no ORM.
+Saíram da árvore os artefatos que descreviam o PostgreSQL (SQL/, apresentação,
+relatório, capturas, decks). Continuam na tag e no repositório original.
 
 ---
 
-## D06 — Usuário próprio do PostgreSQL para a aplicação
+## N04 — O domínio continua sendo café especial
 
-Slides 20 e 35: *"a aplicação usa usuário próprio no PostgreSQL, não
-superusuário"*.
-
-O `postgres` pode dropar qualquer coisa no cluster inteiro. Uma falha de SQL
-injection ou um bug num script rodando como superusuário é catastrófico. O
-`torra_app` tem apenas `SELECT`, `INSERT`, `UPDATE` e `DELETE` nas tabelas da
-aplicação — não pode alterar o schema nem tocar em outros bancos.
-
-Ver `SQL/usuario_app.sql`.
-
-**Correção feita durante o deploy.** Este documento afirmava antes que "no
-Railway isso é resolvido pelo provedor". **Estava errado.** A conferência em
-produção mostrou:
-
-```
-usuario=postgres  superuser=True  banco=railway
-```
-
-O Railway entrega na `DATABASE_URL` o usuário `postgres`, que é superusuário
-dentro daquele container. O isolamento do provedor é no nível do **container**,
-não no nível do **papel** — e o RNF04 fala de papel.
-
-Criamos então o `torra_app` também no banco de produção, com os mesmos
-privilégios restritos, e apontamos a `DATABASE_URL` do serviço para ele. A
-verificação depois da troca:
-
-```
-conectou como torra_app | superuser=False
-SELECT ok -> 12 cafés
-INSERT e UPDATE ok (sequence acessível)
-DROP TABLE negado, como esperado: InsufficientPrivilege
-```
-
-**Efeito colateral aceito:** a `DATABASE_URL` deixou de ser a *reference
-variable* `${{Postgres.DATABASE_URL}}` e virou uma URL explícita. Se o Railway
-trocar o hostname interno do Postgres, a referência se atualizaria sozinha e a
-URL explícita não. A senha do `torra_app` é nossa e não rotaciona, e
-`postgres.railway.internal` é estável — mas é um ponto de manutenção que antes
-não existia.
+O projeto-base do professor vende teclado, mouse e mochila. Mantivemos o café
+por três motivos: a comparação fica direta (mesmo domínio nos dois bancos); a
+**moagem escolhida na compra** continua sendo o argumento central da
+modelagem; e o catálogo de produção migrou pronto (`docs/cafes.json`).
 
 ---
 
-## D07 — SERIAL em vez de IDENTITY
+## N05 — HTTP puro com `requests`, sem biblioteca de CouchDB
 
-`GENERATED BY DEFAULT AS IDENTITY` é o padrão SQL moderno e o preferido no
-PostgreSQL 10+. Usamos `SERIAL` porque é a forma que aparece no material do
-professor (slide 21) e a que o grupo consegue explicar sem ressalvas na defesa.
-
-A diferença prática neste projeto é nula: ambos criam uma sequence.
+O material usa `requests` e um wrapper HTTP centralizado (slides 29 e 32).
+Antes de escrever o `banco.py` procuramos no GitHub bibliotecas e projetos
+Flask + CouchDB: nada acima de 50 estrelas nem mantido. O SDK oficial do
+Cloudant existe, mas prenderia o código ao Cloudant e esconderia exatamente o
+que o trabalho precisa mostrar — o `_rev`, o 409 e o `_bulk_docs`.
 
 ---
 
-## D08 — Flask-SQLAlchemy no `requirements.txt`
+## N06 — Dinheiro em centavos inteiros
 
-**Aqui houve um descumprimento de regra, e ele precisa estar registrado.**
+JSON não tem tipo decimal, e o JavaScript do CouchDB trata todo número como
+ponto flutuante binário, que não representa 0,10 de forma exata. Guardar
+`preco_centavos: 14800` mantém a regra do relacional — "nunca FLOAT para
+dinheiro" — num formato que o JSON representa sem erro. A conversão para
+`R$ 148,00` acontece só na tela.
 
-A regra 2 do `CLAUDE.md` fecha a stack em PostgreSQL, Python, Flask,
-SQLAlchemy, Jinja, psycopg 3, gunicorn, pytest e python-dotenv, e diz:
-*"Nada além disso sem me perguntar antes."*
+---
 
-O `requirements.txt` tem **Flask-SQLAlchemy**, que não está nessa lista. Ele
-foi adicionado sem a pergunta prévia que a regra exige.
+## N07 — Regras no banco, com `validate_doc_update`
 
-**A justificativa técnica existe** — o material do professor usa essa
-biblioteca. O slide 29 mostra exatamente esta API:
+No relacional, a regra D05 dizia: a constraint vive no banco. O CouchDB não
+tem `CHECK`, mas executa uma função JavaScript a cada gravação e recusa o
+documento com HTTP 403 se ela lançar erro. `couchdb/validacao.js` é essa
+função; ela vale para a loja, para o Fauxton, para um `curl` e para a
+replicação.
 
-```python
-db = SQLAlchemy(app)
+A aplicação confere as mesmas regras antes de gravar (`validar_produto`,
+`validar_pedido`), só para dar mensagem amigável e poupar uma ida ao banco.
 
-class Produto(db.Model):
-    __tablename__ = "produtos"
-```
+A função vai além do que o `CHECK` fazia: depois de gravado, os itens de um
+pedido não mudam mais, e um pedido cancelado não volta a valer.
 
-`SQLAlchemy(app)` e `db.Model` são do Flask-SQLAlchemy, não do SQLAlchemy
-puro. Seguir o slide à risca implica usá-la. Ela é uma camada fina sobre o
-SQLAlchemy: cuida do ciclo de vida da sessão dentro do contexto do Flask e
-do `db.Model` declarativo.
+---
 
-**O que mudaria sem ela:** o projeto usaria `sessionmaker` e
-`scoped_session` montados à mão, e o código se afastaria do exemplo do
-material — ficaria mais difícil de defender na apresentação, não mais fácil.
+## N08 — E-mail único por documento-chave
 
-**Como reverter, se for exigido:** trocar `db = SQLAlchemy()` por um
-`registry()` do SQLAlchemy 2.0, criar a sessão por requisição num
-`teardown_appcontext`, e ajustar os cinco modelos para herdar de uma
-`DeclarativeBase`. É trabalho de uma tarde e não muda o schema, o
-`checkout` nem os testes.
+O CouchDB não tem `UNIQUE`. A única unicidade garantida é a do `_id`. Por
+isso o cadastro grava primeiro `email:<endereço>`; se outro cadastro chegou
+antes, o banco responde 409. Uma consulta prévia ao índice não bastaria:
+entre ela e a gravação, outro cadastro pode entrar.
 
-**Atualização.** A regra foi relaxada depois: a orientação passou a ser
-*"pode ser qualquer linguagem desde que seja SQL"*. O Flask-SQLAlchemy deixa
-de ser um desvio — mas o registro fica, porque a decisão foi tomada antes da
-autorização, e é isso que este documento existe para rastrear.
+Se o cliente não chega a ser gravado, o documento do e-mail é apagado na hora
+(compensação). Se a função morrer entre as duas gravações, a reconciliação
+libera o e-mail depois.
+
+---
+
+## N09 — Checkout como saga, com marcas de reserva
+
+Sem transação entre documentos, o tudo-ou-nada virou responsabilidade nossa:
+pedido `PENDENTE`, reserva de estoque com uma marca `{pedido_id: quantidade}`
+no próprio café, confirmação e, se algo falhar, compensação. A marca é o que
+torna a compensação exata depois de um timeout. Detalhes em
+[`checkout_saga.md`](checkout_saga.md).
+
+O pedido cancelado **fica registrado**, com o motivo no histórico, em vez de
+ser apagado. No relacional o ROLLBACK não deixava rastro; aqui o rastro é a
+trilha de auditoria de uma compra que começou e não fechou.
+
+---
+
+## N10 — Testes com dublê em memória e com CouchDB de verdade
+
+A regra do relacional era testar contra o banco de verdade (não SQLite). Ela
+continua: o GitHub Actions roda a suíte inteira contra o Apache CouchDB 3.5.
+
+A máquina do grupo não tem Docker, então a mesma suíte também roda contra um
+dublê em memória (`tests/couchdb_falso.py`), que substitui a rede e reproduz
+`_rev`, 409, `_bulk_docs`, `_find` e a regra de uso de índices do Mango. Ele
+não executa JavaScript: os testes da `validate_doc_update` só rodam contra o
+CouchDB de verdade — no CI ou com `TEST_COUCHDB_URL`.
+
+Os cenários de concorrência forçam o 409 trocando um método do cliente HTTP
+na hora certa, e isso funciona igual nos dois modos.
+
+---
+
+## N11 — O cliente logado vem da sessão
+
+No relacional, toda página buscava o cliente no banco só para escrever "Sair"
+no menu. No Cloudant isso seria uma leitura cobrada por página. O nome do
+cliente é gravado na sessão no login; o banco só é consultado quando a página
+precisa de dados de verdade.

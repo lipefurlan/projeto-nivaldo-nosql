@@ -1,91 +1,99 @@
-# Torra &amp; Terra
+# Torra &amp; Terra — versão NoSQL
 
-E-commerce de café especial em Flask + PostgreSQL.
+E-commerce de café especial em **Flask + Apache CouchDB**.
 
-Projeto integrador da disciplina **Tratamento e Armazenamento da Informação** —
-FACAMP, Prof. Nivaldo T. Marcusso.
+Projeto da disciplina **Tratamento e Armazenamento da Informação** — FACAMP,
+Prof. Nivaldo T. Marcusso.
 
-A loja é o pretexto. O que o projeto demonstra é **modelagem relacional,
-constraints no banco, transação atômica e deploy em cloud**.
+[![testes](https://github.com/lipefurlan/projeto-nivaldo-nosql/actions/workflows/testes.yml/badge.svg)](https://github.com/lipefurlan/projeto-nivaldo-nosql/actions/workflows/testes.yml)
 
-![Print do projeto](2026-08-26-195256.jpg)
+É a mesma loja do projeto relacional, agora sobre um banco de documentos. O
+objetivo é o do material: **comparar na prática o ciclo de uma aplicação
+NoSQL com o do projeto relacional**. O lado PostgreSQL continua disponível:
+
+- na tag [`v1-relacional`](https://github.com/lipefurlan/projeto-nivaldo-nosql/tree/v1-relacional) deste repositório, com todo o histórico;
+- no repositório original, [hick12/projeto-nivaldo](https://github.com/hick12/projeto-nivaldo).
 
 ---
 
 ## O que ele faz
 
-Catálogo de 12 cafés de origem única em 4 regiões produtoras brasileiras. O
-cliente filtra por região, escolhe **quantidade e moagem**, monta o carrinho,
-se cadastra e finaliza a compra. O checkout grava o pedido, grava os itens e
-baixa o estoque — os três dentro de uma transação única.
+Catálogo de 12 cafés de origem única em 4 regiões produtoras. O cliente
+filtra por região, escolhe **quantidade e moagem**, monta o carrinho, se
+cadastra e finaliza a compra. O pedido guarda os itens com o preço da data da
+compra, e o estoque baixa sem vender o mesmo lote duas vezes.
 
-**Por que café especial:** cada item do pedido carrega a moagem escolhida na
-compra — grão, média ou fina. É um atributo que existe só no item, nunca no
-produto. É o que faz `itens_pedido` ser uma entidade de verdade, e não uma
-tabela de ligação.
+---
+
+## O que mudou do PostgreSQL para o CouchDB
+
+| No relacional | Aqui | Onde ver |
+|---|---|---|
+| 5 tabelas normalizadas | 5 tipos de documento JSON, com `tipo` e `_id` legível | [`couchdb/seed.json`](couchdb/seed.json) |
+| `itens_pedido` com FK | itens **embutidos** no pedido, com nome e preço como *snapshot* | [`docs/modelo_documental.md`](docs/modelo_documental.md) |
+| `CHECK` no DDL | `validate_doc_update`: o próprio CouchDB recusa o documento inválido | [`couchdb/validacao.js`](couchdb/validacao.js) |
+| `UNIQUE (email)` | o `_id` de um documento `email:<endereço>` | [`app.py`](app.py) · `cadastrar_cliente` |
+| `CREATE INDEX` | índices Mango, cada um justificado pela consulta | [`couchdb/indices.json`](couchdb/indices.json) |
+| `SELECT ... FOR UPDATE` | controle otimista por `_rev`, nova tentativa no HTTP 409 | [`banco.py`](banco.py) |
+| `COMMIT` / `ROLLBACK` | **saga**: reserva, confirmação e compensação | [`docs/checkout_saga.md`](docs/checkout_saga.md) |
+| `NUMERIC(10,2)` | centavos inteiros — JSON não tem decimal | [`docs/modelo_documental.md`](docs/modelo_documental.md) |
+
+A diferença que importa de verdade está no checkout. No PostgreSQL o banco
+garantia o tudo-ou-nada. No CouchDB a unidade de consistência é **um
+documento**, e `_bulk_docs` não é transação. O projeto-base do material avisa
+o conflito, mas deixa gravado o que já tinha entrado. Aqui, se um café acaba
+no meio da compra, o que foi reservado **volta para o estoque**, e há um
+teste para cada jeito de falhar.
+
+A comparação completa, lado a lado, está em
+[`docs/comparacao_relacional_nosql.md`](docs/comparacao_relacional_nosql.md).
 
 ---
 
 ## Stack
 
-PostgreSQL 17 · Python 3.11 · Flask · SQLAlchemy · Jinja · psycopg 3 ·
-gunicorn · pytest · python-dotenv
+Python 3.12 · Flask · Jinja · requests · python-dotenv · pytest
 
-CSS puro, sem framework. Deploy no Railway.
+**Banco:** Apache CouchDB 3.5 na máquina local, IBM Cloudant em produção —
+os dois falam a mesma API HTTP. **Deploy:** Vercel.
+
+Sem driver: a API do CouchDB é o próprio HTTP, e toda chamada passa por
+[`banco.py`](banco.py). CSS puro, sem framework.
 
 ---
 
-## Rodar localmente, do zero
+## Rodar localmente
 
 ### 1. Pré-requisitos
 
-PostgreSQL rodando e Python 3.11+.
+Python 3.11+ e **um** CouchDB para apontar:
 
-No Windows o `psql` costuma não estar no `PATH`. Ele fica em
-`C:\Program Files\PostgreSQL\17\bin`.
+- **com Docker:** `docker compose up -d` sobe o CouchDB 3.5 do material, com o
+  Fauxton em `http://127.0.0.1:5984/_utils/`;
+- **sem Docker:** use a instância do Cloudant (ver
+  [`docs/deploy_vercel.md`](docs/deploy_vercel.md)).
 
-### 2. Clonar e instalar
-
-```bash
-git clone https://github.com/hick12/projeto-nivaldo.git
-```
+### 2. Instalar
 
 ```bash
-cd projeto-nivaldo && python -m venv .venv
+python -m venv .venv
 ```
 
 Ative o ambiente — `.venv\Scripts\activate` no Windows,
 `source .venv/bin/activate` no Linux e no macOS. Depois:
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 ```
 
-### 3. Criar o banco e o usuário da aplicação
-
-```bash
-psql -U postgres -f SQL/usuario_app.sql
-```
-
-Isso cria o papel `torra_app` e os bancos `torra_terra` e
-`torra_terra_teste`. **Em qualquer ambiente que não seja a sua máquina,
-troque a senha dentro do arquivo antes de rodar.**
-
-> A aplicação usa usuário próprio, nunca o superusuário `postgres`. O
-> superusuário pode dropar qualquer coisa no cluster inteiro; um bug rodando
-> com ele é catastrófico e irreversível.
-
-O banco de testes é separado de propósito: o `pytest` derruba e recria as
-tabelas a cada execução, e apontar para o banco de desenvolvimento apagaria
-o catálogo e os pedidos da demonstração no meio de uma rodada.
-
-### 4. Configurar as variáveis de ambiente
+### 3. Configurar
 
 ```bash
 cp .env.example .env
 ```
 
-Edite o `.env` com a senha que você escolheu. Gere a `SECRET_KEY` com:
+Com Docker, o `.env.example` já aponta para o CouchDB local. Com Cloudant,
+troque o `COUCHDB_URL` pela URL da credencial. Gere a `SECRET_KEY` com:
 
 ```bash
 python -c "import secrets; print(secrets.token_hex(32))"
@@ -93,16 +101,21 @@ python -c "import secrets; print(secrets.token_hex(32))"
 
 O `.env` está no `.gitignore` e **nunca** vai para o repositório.
 
-### 5. Criar as tabelas e carregar o catálogo
+### 4. Criar o banco e carregar o catálogo
 
 ```bash
-flask --app app reset-db
+flask --app app init-db
 ```
 
-Ou em dois passos: `flask --app app init-db` (roda o `schema.sql`) e
-`flask --app app seed-db` (roda o `seed.sql`).
+```bash
+flask --app app seed-db
+```
 
-### 6. Subir
+O `init-db` cria o banco, grava a `validate_doc_update` e os 4 índices Mango.
+O `seed-db` grava as 4 regiões e os 12 cafés num único `_bulk_docs`. Os dois
+podem rodar de novo sem duplicar nada.
+
+### 5. Subir
 
 ```bash
 flask --app app run --debug
@@ -116,10 +129,11 @@ A loja abre em `http://localhost:5000`.
 
 | Variável | Obrigatória | Para que serve |
 |---|:---:|---|
-| `DATABASE_URL` | sim | Conexão com o PostgreSQL. Aceita `postgres://`, `postgresql://` ou `postgresql+psycopg://` — o `app.py` normaliza |
-| `SECRET_KEY` | sim | Assina o cookie de sessão. Sem uma chave forte, a sessão é forjável |
-| `TEST_DATABASE_URL` | não | Banco dos testes. Sem ela, usa a `DATABASE_URL` com sufixo `_teste` |
-| `FLASK_ENV` | não | `development` ou `production` |
+| `COUCHDB_URL` | sim | Endereço do CouchDB ou do Cloudant, com usuário e senha na URL. O `banco.py` tira as credenciais da URL antes de qualquer log |
+| `COUCHDB_DATABASE` | não | Nome do banco. Padrão: `torra_terra` |
+| `COUCHDB_IAM_APIKEY` | não | Só para instância do Cloudant sem credencial legada |
+| `SECRET_KEY` | sim | Assina o cookie de sessão. Em produção a loja não sobe sem ela |
+| `TEST_COUCHDB_URL` | não | CouchDB de verdade para o `pytest`. Sem ela, os testes usam o dublê em memória |
 
 ---
 
@@ -129,153 +143,105 @@ A loja abre em `http://localhost:5000`.
 pytest -v
 ```
 
-Os testes rodam contra um **PostgreSQL de verdade**, não SQLite: o
-`SELECT ... FOR UPDATE` e as constraints `CHECK` do schema são justamente o
-que precisa ser testado, e o SQLite trata os dois de forma diferente.
+A suíte roda de dois jeitos, com o mesmo código:
+
+- **contra um CouchDB de verdade**, quando `TEST_COUCHDB_URL` está definida.
+  Cada rodada cria um banco descartável e o apaga no fim. É assim que ela
+  roda no GitHub Actions, com o Apache CouchDB 3.5 num container;
+- **contra o dublê em memória** ([`tests/couchdb_falso.py`](tests/couchdb_falso.py)),
+  quando não está. Ele substitui a rede, então o `banco.py` roda inteiro por
+  cima dele. Os testes da `validate_doc_update` — JavaScript que só o CouchDB
+  executa — são pulados nesse modo.
 
 O que está coberto:
 
 | Caso | O que prova |
 |---|---|
-| Compra normal | Pedido gravado, itens gravados, estoque reduzido |
-| Estoque insuficiente | Rollback completo, nada gravado, estoque intacto, mensagem nomeando o café |
-| Produto inexistente | Pedido não é finalizado |
-| Preço negativo | A constraint do **banco** recusa, não só a aplicação |
-| Estoque negativo | Idem |
-| Pontuação SCA fora de 80–100 | Idem |
-| Moagem inválida | Idem |
-| Senha | Nunca gravada em texto puro |
-| Mesmo café, duas moagens | Vira duas linhas — `itens_pedido` é entidade |
-| Preço congelado | Reajuste do produto não altera pedido antigo |
+| Compra normal | Pedido `CRIADO`, itens embutidos, estoque baixado, nenhuma marca pendurada |
+| Estoque insuficiente | Nada gravado, estoque intacto, mensagem nomeando o café |
+| Produto inexistente ou desativado | Pedido não é finalizado |
+| 409 no meio do checkout | A saga relê o café e tenta de novo sem perder a baixa da outra compra |
+| Café acaba no meio da saga | **Compensação:** pedido `CANCELADO`, estoque reservado volta |
+| Timeout depois de gravar | As marcas de reserva dizem o que desfazer |
+| Confirmação gravada sem resposta | A compra vale, nada é desfeito |
+| Clique duplo em "Confirmar" | O `_id` do pedido barra a segunda compra |
+| Saga interrompida | `flask reconciliar` termina o serviço, sem devolver em dobro |
+| Regras no banco | Preço negativo, SCA fora de 80–100, moagem inválida, senha em texto puro: o CouchDB responde 403 |
+| Pedido gravado | Itens e preço congelado não podem mais mudar — regra do banco |
+| E-mail único | Vale até com dois cadastros ao mesmo tempo |
+| Índices | O `_explain` do CouchDB confirma o índice de cada consulta |
+| Segurança | CSRF, cabeçalhos, cookie de sessão, redirecionamento pós-login |
 
 ---
 
-## Comandos disponíveis
+## Comandos
 
 | Comando | O que faz |
 |---|---|
-| `flask --app app init-db` | Cria a estrutura a partir do `SQL/schema.sql` |
-| `flask --app app seed-db` | Carrega os 12 cafés do `SQL/seed.sql` |
-| `flask --app app reset-db` | Dropa, recria e recarrega. Só para desenvolvimento |
-
----
-
-## Backup e restauração
-
-Backup só é confiável quando a restauração também é testada.
-
-### Backup lógico
-
-```bash
-pg_dump -U torra_app -d torra_terra -F c -f backup_torra_terra.dump
-```
-
-O `-F c` gera formato *custom*, comprimido e restaurável seletivamente. Para
-um `.sql` legível, use `-F p` — útil para inspecionar o DDL gerado.
-
-Só a estrutura, sem dados:
-
-```bash
-pg_dump -U torra_app -d torra_terra --schema-only -f estrutura.sql
-```
-
-Só os dados, sem estrutura:
-
-```bash
-pg_dump -U torra_app -d torra_terra --data-only -f dados.sql
-```
-
-### Restauração
-
-Em um banco novo, para não sobrescrever o original enquanto testa:
-
-```bash
-psql -U postgres -c "CREATE DATABASE torra_terra_restaurado OWNER torra_app"
-```
-
-```bash
-pg_restore -U torra_app -d torra_terra_restaurado backup_torra_terra.dump
-```
-
-### Verificar que a restauração funcionou
-
-Compare as contagens entre origem e destino. Os números precisam bater:
-
-```bash
-psql -U torra_app -d torra_terra_restaurado -c "SELECT (SELECT COUNT(*) FROM produtos) AS produtos, (SELECT COUNT(*) FROM pedidos) AS pedidos, (SELECT COUNT(*) FROM itens_pedido) AS itens;"
-```
-
-### Backup do banco de produção
-
-O Railway expõe uma `DATABASE_PUBLIC_URL` para conexão externa:
-
-```bash
-pg_dump "<DATABASE_PUBLIC_URL>" -F c -f backup_producao.dump
-```
-
-> Use a `DATABASE_PUBLIC_URL`, não a `DATABASE_URL`. A interna só funciona
-> entre serviços do mesmo projeto Railway.
+| `flask --app app init-db` | Cria o banco, a `validate_doc_update` e os índices |
+| `flask --app app seed-db` | Grava as 4 regiões e os 12 cafés |
+| `flask --app app reset-db` | Apaga e recria tudo. Só para desenvolvimento |
+| `flask --app app reconciliar` | Termina checkouts interrompidos no meio. Idempotente |
 
 ---
 
 ## Estrutura
 
 ```
-├── app.py                  configuração, modelos, rotas e CLI
-├── requirements.txt · Procfile · .env.example · .gitignore
-├── CLAUDE.md               briefing do projeto
-├── SQL/
-│   ├── schema.sql          DDL à mão, com todas as constraints
-│   ├── seed.sql            12 cafés em 4 regiões
-│   ├── usuario_app.sql     papel dedicado da aplicação
-│   └── consultas.sql       validação, evidências e EXPLAIN
-├── templates/              base, catálogo, produto, cadastro, login,
-│                           carrinho, checkout, meus_pedidos
-├── static/style.css
-├── tests/                  conftest.py e test_checkout.py
+├── app.py                  configuração, regras, consultas, checkout, rotas e CLI
+├── banco.py                cliente HTTP do CouchDB: _rev, 409, 429, credenciais
+├── couchdb/
+│   ├── validacao.js        validate_doc_update — as regras aplicadas pelo banco
+│   ├── indices.json        os 4 índices Mango, cada um com a consulta que o justifica
+│   └── seed.json           4 regiões e 12 cafés
+├── templates/              base, catálogo, produto, cadastro, login, carrinho,
+│                           checkout, meus_pedidos, indisponivel
+├── public/static/style.css servido pelo CDN do Vercel
+├── tests/                  suíte pytest e o dublê do CouchDB
+├── docker-compose.yml      CouchDB 3.5 local
+├── FAUXTON_ROTEIRO.md      roteiro de evidências no Fauxton
+├── .github/workflows/      pytest contra CouchDB real a cada push
 └── docs/
-    ├── requisitos.md       RF, RNF, critérios de aceite, backlog, fluxo
-    ├── modelo_er.md        DER em Mermaid + normalização 1FN/2FN/3FN
-    ├── dicionario_dados.md campo · tipo · regra · exemplo
-    ├── evidencias.md       saídas reais dos testes e das consultas
-    ├── decisoes.md         escolhas de projeto justificadas
-    ├── perguntas_defesa.md as 6 perguntas do slide 47
-    ├── prompt_ia.md        prompt usado com a IA (anexo da entrega)
-    └── deploy_railway.md   passo a passo do deploy
+    ├── requisitos.md               RF, RNF, por que NoSQL, consultas antes do modelo
+    ├── modelo_documental.md        documentos, embed x reference, onde foram as constraints
+    ├── consultas_e_indices.md      catálogo de consultas e estratégia de índices
+    ├── checkout_saga.md            a saga do checkout e a matriz de falhas
+    ├── comparacao_relacional_nosql.md
+    ├── decisoes.md                 escolhas de projeto justificadas
+    ├── deploy_vercel.md            Cloudant + Vercel, passo a passo
+    ├── plano_nosql.md              o plano de antes da migração
+    └── cafes.json · cafes.csv      o catálogo de produção migrado
 ```
 
 ---
 
 ## Segurança
 
-- Senhas apenas como **hash scrypt** (`werkzeug.security`). A senha em texto
-  puro nunca chega ao banco
-- `DATABASE_URL` e `SECRET_KEY` vêm de variável de ambiente. Nenhum segredo
-  no código-fonte
-- `.env` no `.gitignore`, `.env.example` versionado
-- A aplicação conecta com **usuário próprio** do PostgreSQL, não o superusuário
-- Validação no formulário **e** no banco — a constraint é a que vale
-- Login com credencial errada devolve mensagem única, sem revelar se o erro
-  foi no e-mail ou na senha
-- O redirecionamento pós-login só aceita destino interno, para não virar um
-  *open redirect*
+- Senhas apenas como **hash scrypt**; a `validate_doc_update` recusa até um
+  documento de cliente que tente gravar senha em texto puro
+- Credenciais do banco e `SECRET_KEY` só em variável de ambiente. O
+  `banco.py` tira usuário e senha da URL, então eles não aparecem em log nem
+  em mensagem de erro
+- CSRF com token por sessão, cabeçalhos de segurança (CSP sem JavaScript,
+  `X-Frame-Options`, HSTS), cookie `HttpOnly` e `SameSite=Lax` — as correções
+  do OWASP ZAP do projeto relacional, com teste
+- Login com credencial errada devolve mensagem única, e o redirecionamento
+  pós-login só aceita destino interno
 
 ---
 
-## Limitações conhecidas do MVP
+## Limitações conhecidas
 
-Sem pagamento real, sem frete, sem controle de lote e data de torra, sem área
-administrativa e sem relatórios. O carrinho vive na sessão e não sobrevive à
-troca de dispositivo.
-
-Todas documentadas com o motivo em [`docs/requisitos.md`](docs/requisitos.md),
-seção 8.
+Sem pagamento, frete ou área administrativa. O carrinho vive na sessão. A
+reconciliação é um comando manual — em produção ela seria agendada. O plano
+gratuito do Cloudant limita a vazão (10 escritas e 5 consultas por segundo);
+o `banco.py` espera e repete quando recebe 429. Detalhes em
+[`docs/requisitos.md`](docs/requisitos.md).
 
 ---
 
 ## Deploy
 
-O guia completo está em [`docs/deploy_railway.md`](docs/deploy_railway.md).
-
-A escolha do Railway em vez do Render + Neon sugeridos no material está
-justificada em [`docs/decisoes.md`](docs/decisoes.md), decisão D01.
+Vercel para a aplicação e IBM Cloudant para o banco, os dois no plano
+gratuito. Passo a passo em [`docs/deploy_vercel.md`](docs/deploy_vercel.md);
+a escolha está justificada em [`docs/decisoes.md`](docs/decisoes.md).
