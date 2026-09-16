@@ -7,6 +7,9 @@ Prof. Nivaldo T. Marcusso.
 
 [![testes](https://github.com/lipefurlan/projeto-nivaldo-nosql/actions/workflows/testes.yml/badge.svg)](https://github.com/lipefurlan/projeto-nivaldo-nosql/actions/workflows/testes.yml)
 
+**No ar:** [projeto-nivaldo-nosql.vercel.app](https://projeto-nivaldo-nosql.vercel.app) ·
+apresentação em [`/apresentacao`](https://projeto-nivaldo-nosql.vercel.app/apresentacao)
+
 É a mesma loja do projeto relacional, agora sobre um banco de documentos. O
 objetivo é o do material: **comparar na prática o ciclo de uma aplicação
 NoSQL com o do projeto relacional**. O lado PostgreSQL continua disponível:
@@ -54,8 +57,9 @@ A comparação completa, lado a lado, está em
 
 Python 3.12 · Flask · Jinja · requests · python-dotenv · pytest
 
-**Banco:** Apache CouchDB 3.5 na máquina local, IBM Cloudant em produção —
-os dois falam a mesma API HTTP. **Deploy:** Vercel.
+**Banco:** Apache CouchDB 3.5 — na máquina local pelo `docker-compose.yml` e,
+em produção, a mesma imagem oficial num container do Railway. **Deploy:**
+Vercel.
 
 Sem driver: a API do CouchDB é o próprio HTTP, e toda chamada passa por
 [`banco.py`](banco.py). CSS puro, sem framework.
@@ -70,8 +74,10 @@ Python 3.11+ e **um** CouchDB para apontar:
 
 - **com Docker:** `docker compose up -d` sobe o CouchDB 3.5 do material, com o
   Fauxton em `http://127.0.0.1:5984/_utils/`;
-- **sem Docker:** use a instância do Cloudant (ver
-  [`docs/deploy_vercel.md`](docs/deploy_vercel.md)).
+- **sem Docker:** use o CouchDB do Railway (ver
+  [`docs/deploy_vercel.md`](docs/deploy_vercel.md)), com um banco só seu,
+  por exemplo `COUCHDB_DATABASE=torra_terra_dev`, para não mexer na loja que
+  está no ar.
 
 ### 2. Instalar
 
@@ -92,8 +98,10 @@ pip install -r requirements-dev.txt
 cp .env.example .env
 ```
 
-Com Docker, o `.env.example` já aponta para o CouchDB local. Com Cloudant,
-troque o `COUCHDB_URL` pela URL da credencial. Gere a `SECRET_KEY` com:
+Com Docker, o `.env.example` já aponta para o CouchDB local. Sem Docker,
+troque o `COUCHDB_URL` pelo endereço do CouchDB do Railway, com o usuário
+`admin` — ele só existe na sua máquina, nunca no Vercel. Gere a `SECRET_KEY`
+com:
 
 ```bash
 python -c "import secrets; print(secrets.token_hex(32))"
@@ -129,9 +137,9 @@ A loja abre em `http://localhost:5000`.
 
 | Variável | Obrigatória | Para que serve |
 |---|:---:|---|
-| `COUCHDB_URL` | sim | Endereço do CouchDB ou do Cloudant, com usuário e senha na URL. O `banco.py` tira as credenciais da URL antes de qualquer log |
+| `COUCHDB_URL` | sim | Endereço do CouchDB, com usuário e senha na URL. Em produção, o usuário restrito `torra_app`. O `banco.py` tira as credenciais da URL antes de qualquer log |
 | `COUCHDB_DATABASE` | não | Nome do banco. Padrão: `torra_terra` |
-| `COUCHDB_IAM_APIKEY` | não | Só para instância do Cloudant sem credencial legada |
+| `COUCHDB_IAM_APIKEY` | não | Só para uma instância do IBM Cloudant sem credencial legada. O deploy atual não usa |
 | `SECRET_KEY` | sim | Assina o cookie de sessão. Em produção a loja não sobe sem ela |
 | `TEST_COUCHDB_URL` | não | CouchDB de verdade para o `pytest`. Sem ela, os testes usam o dublê em memória |
 
@@ -211,7 +219,7 @@ O que está coberto:
     ├── checkout_saga.md            a saga do checkout e a matriz de falhas
     ├── comparacao_relacional_nosql.md
     ├── decisoes.md                 escolhas de projeto justificadas
-    ├── deploy_vercel.md            Cloudant + Vercel, passo a passo
+    ├── deploy_vercel.md            Vercel + CouchDB no Railway, passo a passo
     ├── plano_nosql.md              o plano de antes da migração
     └── cafes.json · cafes.csv      o catálogo de produção migrado
 ```
@@ -247,23 +255,28 @@ gerar de novo está em [`docs/apresentacao/README.md`](docs/apresentacao/README.
 ## Limitações conhecidas
 
 Sem pagamento, frete ou área administrativa. O carrinho vive na sessão. A
-reconciliação é um comando manual — em produção ela seria agendada. O plano
-gratuito do Cloudant limita a vazão (20 leituras, 10 escritas e 5 consultas
-globais por segundo); o `banco.py` espera e repete quando recebe 429.
+reconciliação é um comando manual — em produção ela seria agendada.
 
-Duas limitações de cluster, documentadas em
-[`docs/checkout_saga.md`](docs/checkout_saga.md) e
-[`docs/modelo_documental.md`](docs/modelo_documental.md): no Cloudant, duas
-gravações quase simultâneas no mesmo documento podem terminar como revisões em
-conflito (HTTP 202) em vez de um 409, e a loja não lê `_conflicts`; e o
-documento `email:<endereço>` põe o e-mail no `_id`, que aparece em logs e
-fica no túmulo de exclusão — trocar por um hash do e-mail é o próximo passo.
-Mais em [`docs/requisitos.md`](docs/requisitos.md).
+O banco de produção é **um nó só**, sem réplica: o backup é uma replicação
+feita à mão ([`docs/deploy_vercel.md`](docs/deploy_vercel.md), seção
+Operação). Num nó único, o conflito de `_rev` é sempre um 409. Num cluster —
+o IBM Cloudant, ou um CouchDB em cluster —, duas gravações quase simultâneas
+no mesmo documento poderiam terminar como revisões em conflito (HTTP 202), e
+a loja não lê `_conflicts`; o risco está em
+[`docs/checkout_saga.md`](docs/checkout_saga.md) e volta numa migração.
+
+O documento `email:<endereço>` põe o e-mail no `_id`, que aparece em logs e
+fica no túmulo de exclusão — trocar por um hash do e-mail é o próximo passo
+([`docs/modelo_documental.md`](docs/modelo_documental.md)). Mais em
+[`docs/requisitos.md`](docs/requisitos.md).
 
 ---
 
 ## Deploy
 
-Vercel para a aplicação e IBM Cloudant para o banco, os dois no plano
-gratuito. Passo a passo em [`docs/deploy_vercel.md`](docs/deploy_vercel.md);
-a escolha está justificada em [`docs/decisoes.md`](docs/decisoes.md).
+Vercel (plano Hobby, gratuito) para a aplicação e Apache CouchDB 3.5 num
+container do Railway, com volume persistente, para o banco. A loja no Vercel
+entra no banco com um usuário restrito, que não mexe nas regras nem apaga o
+banco. Passo a passo em [`docs/deploy_vercel.md`](docs/deploy_vercel.md); a
+escolha, e por que o IBM Cloudant ficou de fora, em
+[`docs/decisoes.md`](docs/decisoes.md) (N02 e N12).

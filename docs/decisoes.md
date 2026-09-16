@@ -17,27 +17,46 @@ Fauxton, `_rev`, Mango e teste de conflito — tudo específico do CouchDB.
 
 ---
 
-## N02 — Vercel + IBM Cloudant, no lugar do Railway
+## N02 — Vercel + CouchDB no Railway
 
-**Motivo:** custo. O Railway cobra por uso, e manter a aplicação e mais um
-banco rodando passou a pesar.
+**Motivo:** custo. O Railway cobra por uso, e manter a aplicação Flask ligada
+o tempo todo passou a pesar.
 
 - O slide 48 lista para o Flask "Render/Railway/Fly/VM — verificar cota
-  vigente". O Vercel ocupa o mesmo papel e roda Flask sem configuração.
-- Para o banco, o mesmo slide cita o **IBM Cloudant** como opção compatível.
-  O plano Lite é gratuito e não expira.
-- O Vercel não hospeda banco nenhum; um CouchDB próprio exigiria uma VM. O
-  Cloudant resolve sem operação.
-- A função do Vercel (Washington, D.C.) e o Cloudant (Washington DC) ficam na
-  mesma região.
+  vigente". O Vercel ocupa o mesmo papel, roda Flask sem configuração e, no
+  plano Hobby, não cobra: a função só acorda quando chega uma visita.
+- O Vercel não hospeda banco. O CouchDB ficou no Railway, na imagem Docker
+  oficial `couchdb:3.5`, com um volume em `/opt/couchdb/data` para os dados
+  sobreviverem a restart e redeploy.
+- A função do Vercel (Washington, D.C.) e o CouchDB (US East, Virgínia) ficam
+  na mesma região. Medido em produção: 20 ms de mediana por ida ao banco.
 
-**Custos aceitos.** A conta da IBM exige cartão para verificação. O plano Lite
-limita a vazão (10 escritas/s, 5 consultas/s), e por isso o `banco.py` trata o
-HTTP 429. Uma função serverless pode morrer entre duas gravações, e por isso
-existe a reconciliação.
+**Primeiro plano, descartado: IBM Cloudant.** É o CouchDB gerenciado que o
+slide 48 cita como opção compatível, com um plano Lite gratuito e sem
+operação. Ficou de fora porque a conta da IBM Cloud exige cartão de crédito,
+com uma retenção de verificação de cerca de US$ 1, e o grupo decidiu publicar
+sem cartão.
 
-**Plano B.** Um CouchDB em container (numa VM ou no próprio Railway) fala a
-mesma API: basta trocar o `COUCHDB_URL`. Nenhuma linha de código muda.
+**O plano B virou o plano, sem mudar código.** Esta decisão já previa: um
+CouchDB em container fala a mesma API, basta trocar o `COUCHDB_URL`. Foi o
+que aconteceu — nenhuma linha de código mudou. O suporte ao Cloudant (token
+IAM e repetição no HTTP 429 da cota de vazão) continua no `banco.py` para uma
+migração futura.
+
+**Custos aceitos.**
+
+- **Nó único, sem réplica.** Se o container cair, a loja mostra a página de
+  indisponível até ele voltar, e o backup é uma replicação feita à mão.
+- **O banco não é gratuito.** Ele entra na conta de uso do Railway que o grupo
+  já pagava pelo projeto relacional: 190 MB de memória e 92 MB de disco,
+  medidos com a loja no ar.
+- **A função pode morrer entre duas gravações.** Uma função serverless pode
+  ser encerrada no meio da saga, e por isso existe a reconciliação.
+
+O nó único tem uma vantagem para o trabalho. O conflito de `_rev` é sempre um
+409, e o `_find` enxerga a última gravação. As ressalvas de cluster (HTTP 202,
+revisões em conflito, índice eventual) ficam documentadas para uma migração,
+mas não valem para a produção atual.
 
 ---
 
@@ -144,6 +163,34 @@ na hora certa, e isso funciona igual nos dois modos.
 ## N11 — O cliente logado vem da sessão
 
 No relacional, toda página buscava o cliente no banco só para escrever "Sair"
-no menu. No Cloudant isso seria uma leitura cobrada por página. O nome do
+no menu. Aqui isso seria uma ida a mais ao banco em toda página — latência no
+Railway, e leitura contada na cota se a loja migrar para o Cloudant. O nome do
 cliente é gravado na sessão no login; o banco só é consultado quando a página
 precisa de dados de verdade.
+
+---
+
+## N12 — Usuário próprio no CouchDB
+
+É a decisão D06 do relacional ("usuário próprio, não superusuário") trazida
+para o CouchDB. A loja no Vercel não entra com o `admin`: entra com
+`torra_app`, um usuário comum do `_users` que o `_security` do banco
+`torra_terra` lista como único **membro**.
+
+| O `torra_app`... | Por quê |
+|---|---|
+| lê, grava e apaga documentos | é tudo o que a loja faz |
+| **não** grava `_design/...` | a `validate_doc_update` e os índices moram em design documents; uma senha vazada não desliga as regras do banco |
+| **não** muda o `_security` | senão poderia se promover a administrador, ou tirar a lista de membros e abrir o banco para qualquer um |
+| **não** apaga o banco | só administrador apaga banco no CouchDB |
+
+Conferido contra o Railway: anônimo recebe 401; o `torra_app` grava e apaga
+um documento, recebe 403 ao gravar um design document e 401 ao apagar o
+banco; e a `validate_doc_update` recusa um estoque negativo gravado por ele
+com 403. A tentativa de trocar o `_security` também é recusada, mas o CouchDB
+3.5.2 responde com um 500 `no_majority` em vez de 401 — conferimos depois,
+com o admin, que o `_security` continuou o mesmo.
+
+O `admin` fica só na máquina de quem roda `init-db`, `seed-db`, `reset-db` e
+`reconciliar`. O `reset-db` recria o banco e perde o `_security`; o passo a
+passo de reaplicar está em [`deploy_vercel.md`](deploy_vercel.md).
