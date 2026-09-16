@@ -608,6 +608,13 @@ main { padding: var(--s-4) var(--s-3) var(--s-6); }
   letter-spacing: 0.08em;
 }
 
+/* Pedido cancelado pela compensação do checkout: sai do laranja de destaque
+   e fica em tom neutro, sem caixa colorida nova. */
+.selo-cancelado {
+  background: var(--bg);
+  color: var(--muted);
+}
+
 .pedido-itens {
   list-style: none;
   margin: 0;
