@@ -1,0 +1,65 @@
+name: testes
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  couchdb-real:
+    name: pytest contra o Apache CouchDB 3.5 de verdade
+    runs-on: ubuntu-latest
+
+    # O mesmo CouchDB do docker-compose.yml, num container ao lado do teste.
+    # É aqui que a validate_doc_update (JavaScript) roda de verdade.
+    services:
+      couchdb:
+        image: couchdb:3.5
+        env:
+          COUCHDB_USER: admin
+          COUCHDB_PASSWORD: admin
+        ports:
+          - 5984:5984
+
+    env:
+      TEST_COUCHDB_URL: http://admin:admin@127.0.0.1:5984
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - run: pip install -r requirements-dev.txt
+
+      - name: Esperar o CouchDB responder
+        run: |
+          for tentativa in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:5984/_up && break
+            sleep 2
+          done
+          curl -fsS http://admin:admin@127.0.0.1:5984/
+          # Bancos de sistema que um nó único espera encontrar.
+          curl -sS -X PUT http://admin:admin@127.0.0.1:5984/_users
+          curl -sS -X PUT http://admin:admin@127.0.0.1:5984/_replicator
+
+      - run: pytest -v -rs
+
+  duble-em-memoria:
+    name: pytest com o dublê em memória (sem Docker)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - run: pip install -r requirements-dev.txt
+
+      - run: pytest -v -rs

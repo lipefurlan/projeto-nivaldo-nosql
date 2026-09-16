@@ -1,124 +1,127 @@
 """Fixtures dos testes.
 
-Os testes rodam contra um PostgreSQL de verdade, num banco separado. Nao
-usamos SQLite: `SELECT ... FOR UPDATE` e as constraints CHECK do schema sao
-justamente o que precisa ser testado, e o SQLite trata os dois de forma
-diferente. Testar contra outro banco daria confianca falsa.
+A mesma suíte roda de dois jeitos:
 
-Banco de teste — por padrao o mesmo da DATABASE_URL com o sufixo `_teste`,
-ou o valor de TEST_DATABASE_URL. Crie-o uma vez com:
+- contra um CouchDB DE VERDADE, quando a variável TEST_COUCHDB_URL está
+  definida. É assim que ela roda no GitHub Actions, com o Apache CouchDB 3
+  num container, e é assim que se testa contra o Cloudant;
+- contra o dublê em memória (tests/couchdb_falso.py), quando não está. É o
+  que permite rodar `pytest` numa máquina sem Docker.
 
-    createdb torra_terra_teste
+Os testes que dependem da validate_doc_update — JavaScript executado pelo
+CouchDB — são marcados `couchdb_real` e pulados com o dublê.
+
+Cada rodada cria um banco com nome aleatório e o apaga no fim. Os testes
+nunca encostam no banco de desenvolvimento nem no de produção.
 """
 
 import os
-from decimal import Decimal
+import uuid
+from pathlib import Path
 
 import pytest
+import requests
 from dotenv import load_dotenv
-from werkzeug.security import generate_password_hash
 
-from app import (
-    Categoria,
-    Cliente,
-    Produto,
-    _executar_script,
-    criar_app,
-    db,
-    normalizar_url,
-)
+from apoio import produto_de_teste
+from app import cadastrar_cliente, criar_app, preparar_banco
+from banco import CouchDB
+from couchdb_falso import CouchDBFalso
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+URL_REAL = os.getenv("TEST_COUCHDB_URL")
+URL_FALSA = "http://couchdb-falso"
 
 
-def url_de_teste() -> str:
-    explicita = os.getenv("TEST_DATABASE_URL")
-    if explicita:
-        return explicita
+def pytest_report_header(config):
+    if URL_REAL:
+        return "banco dos testes: CouchDB de verdade (TEST_COUCHDB_URL)"
+    return "banco dos testes: dublê em memória — defina TEST_COUCHDB_URL para usar um CouchDB de verdade"
 
-    base = os.getenv(
-        "DATABASE_URL",
-        "postgresql://postgres:postgres@localhost:5432/torra_terra",
-    )
-    # Sufixo no nome do banco, preservando host, porta e credenciais.
-    base, _, query = base.partition("?")
-    return f"{base}_teste" + (f"?{query}" if query else "")
+
+def pytest_collection_modifyitems(config, items):
+    if URL_REAL:
+        return
+    pular = pytest.mark.skip(reason="precisa de CouchDB de verdade: defina TEST_COUCHDB_URL")
+    for item in items:
+        if "couchdb_real" in item.keywords:
+            item.add_marker(pular)
 
 
 @pytest.fixture(scope="session")
 def aplicacao():
+    sessao = requests.Session()
+    if URL_REAL:
+        url = URL_REAL
+    else:
+        url = URL_FALSA
+        sessao.mount(URL_FALSA, CouchDBFalso())
+
     app = criar_app(
         {
-            "SQLALCHEMY_DATABASE_URI": normalizar_url(url_de_teste()),
             "TESTING": True,
             "SECRET_KEY": "chave-de-teste",
-            "WTF_CSRF_ENABLED": False,
+            "COUCHDB_URL": url,
+            "COUCHDB_DATABASE": f"torra_terra_teste_{uuid.uuid4().hex[:8]}",
+            "COUCHDB_IAM_APIKEY": None,
+            "COUCHDB_SESSAO": sessao,
         }
     )
 
     with app.app_context():
-        # A estrutura vem do mesmo DDL da aplicacao. Se o schema.sql
-        # quebrar, os testes quebram junto — que e o comportamento correto.
-        _executar_script("schema.sql")
+        # A estrutura sai do mesmo código do `flask init-db`: se a
+        # validate_doc_update ou um índice quebrar, os testes quebram junto.
+        preparar_banco()
         yield app
+        app.extensions["couchdb"].apagar_banco()
 
 
 @pytest.fixture
-def contexto(aplicacao):
-    """Cada teste comeca com o banco limpo."""
-    with aplicacao.app_context():
-        db.session.execute(
-            db.text(
-                "TRUNCATE TABLE itens_pedido, pedidos, produtos, categorias, "
-                "clientes RESTART IDENTITY CASCADE"
-            )
-        )
-        db.session.commit()
-        yield
-        db.session.rollback()
+def banco(aplicacao) -> CouchDB:
+    """O cliente do banco da loja. Cada teste começa com o banco vazio."""
+    cliente_http = aplicacao.extensions["couchdb"]
+    restos = [
+        doc
+        for doc in cliente_http.listar_por_prefixo("", com_documentos=False)
+        if not doc["_id"].startswith("_design/")
+    ]
+    if restos:
+        cliente_http.gravar_lote([{**doc, "_deleted": True} for doc in restos])
+    return cliente_http
 
 
 @pytest.fixture
-def cliente(contexto) -> Cliente:
-    registro = Cliente(
-        nome="Ana Teste",
-        email="ana@exemplo.com",
-        senha_hash=generate_password_hash("senha-de-teste-123"),
-    )
-    db.session.add(registro)
-    db.session.commit()
-    return registro
+def concorrente(aplicacao, banco) -> CouchDB:
+    """Outro cliente do mesmo banco: a outra compra acontecendo ao mesmo tempo.
+
+    É outra instância de propósito. Os testes trocam métodos da instância da
+    loja para simular falhas, e o concorrente precisa continuar falando com
+    o banco normalmente.
+    """
+    return CouchDB(aplicacao.config["COUCHDB_URL"], banco.banco, sessao=aplicacao.config["COUCHDB_SESSAO"])
 
 
 @pytest.fixture
-def catalogo(contexto) -> dict[str, Produto]:
-    """Dois cafes: um com estoque folgado, outro com estoque 1."""
-    categoria = Categoria(
-        nome="Chapada Diamantina", regiao="Bahia", descricao="Altitude."
-    )
-    db.session.add(categoria)
-    db.session.flush()
+def catalogo(banco) -> dict[str, dict]:
+    """Uma região e dois cafés: um com estoque folgado, outro com estoque 1."""
+    categoria = {
+        "_id": "categoria:chapada-diamantina",
+        "tipo": "categoria",
+        "nome": "Chapada Diamantina",
+        "regiao": "Bahia",
+        "descricao": "Altitudes acima de 1.000 m no semiárido baiano.",
+        "versao_esquema": 1,
+    }
+    farto = produto_de_teste("piata-altitude", "Piatã Altitude", preco_centavos=8900, estoque=10)
+    escasso = produto_de_teste("chapada-geisha", "Chapada Geisha", preco_centavos=14800, estoque=1)
 
-    farto = Produto(
-        nome="Piata Altitude",
-        preco=Decimal("89.00"),
-        estoque=10,
-        categoria_id=categoria.id,
-        torra="CLARA",
-        pontuacao_sca=Decimal("89.25"),
-        peso_g=250,
-    )
-    escasso = Produto(
-        nome="Chapada Geisha",
-        preco=Decimal("148.00"),
-        estoque=1,
-        categoria_id=categoria.id,
-        torra="CLARA",
-        pontuacao_sca=Decimal("91.00"),
-        peso_g=250,
-    )
+    for doc in (categoria, farto, escasso):
+        banco.salvar(doc)
 
-    db.session.add_all([farto, escasso])
-    db.session.commit()
+    return {"categoria": categoria, "farto": farto, "escasso": escasso}
 
-    return {"farto": farto, "escasso": escasso}
+
+@pytest.fixture
+def cliente(banco) -> dict:
+    return cadastrar_cliente("Ana Teste", "ana@exemplo.com", "senha-de-teste-123")
