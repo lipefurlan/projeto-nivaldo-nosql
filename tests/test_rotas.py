@@ -112,6 +112,35 @@ def test_login_errado_nao_diz_o_que_errou(navegador, cliente):
 # RF03, RF05 e RF06 — Carrinho, checkout e pedidos
 # ---------------------------------------------------------------------
 
+def test_moagem_invalida_nao_entra_no_carrinho(navegador, catalogo):
+    adicionar(navegador, "piata-altitude", 1, "MOIDA")
+
+    with navegador.session_transaction() as sessao:
+        assert not sessao.get("carrinho")
+
+
+def test_quantidade_menor_que_um_nao_entra_no_carrinho(navegador, catalogo):
+    adicionar(navegador, "piata-altitude", 0)
+
+    with navegador.session_transaction() as sessao:
+        assert not sessao.get("carrinho")
+
+
+def test_cafe_desativado_sai_do_carrinho_com_aviso(navegador, banco, catalogo):
+    """Sem isto, o checkout falharia por um item que nem aparece na tela."""
+    adicionar(navegador, "chapada-geisha", 1)
+    adicionar(navegador, "piata-altitude", 1)
+    geisha = banco.obter(catalogo["escasso"]["_id"])
+    geisha["ativo"] = False
+    banco.salvar(geisha)
+
+    html = navegador.get("/carrinho").get_data(as_text=True)
+
+    assert "saiu do catálogo e foi retirado" in html
+    with navegador.session_transaction() as sessao:
+        assert [linha["produto_id"] for linha in sessao["carrinho"]] == ["produto:piata-altitude"]
+
+
 def test_checkout_exige_login_e_devolve_o_cliente_ao_checkout(navegador, catalogo):
     adicionar(navegador, "piata-altitude")
 
@@ -138,6 +167,19 @@ def test_compra_de_ponta_a_ponta(navegador, banco, cliente, catalogo):
     assert banco.obter("produto:piata-altitude")["estoque"] == 8
 
 
+def test_meus_pedidos_mostra_o_pedido_recem_feito_mesmo_com_indice_atrasado(navegador, banco, cliente, catalogo, monkeypatch):
+    """No Cloudant a consulta ao índice pode ainda não ver o pedido novo."""
+    entrar(navegador)
+    adicionar(navegador, "piata-altitude", 1)
+    token = extrair_token(navegador.get("/checkout").get_data(as_text=True))
+    navegador.post("/checkout", data={"_csrf": token})
+
+    monkeypatch.setattr(banco, "buscar", lambda consulta: [])  # índice ainda sem o pedido
+
+    html = navegador.get("/meus-pedidos").get_data(as_text=True)
+    assert "1 × Piatã Altitude" in html
+
+
 def test_clique_duplo_no_confirmar_nao_gera_dois_pedidos(navegador, banco, cliente, catalogo):
     """As duas requisições saem do navegador com o MESMO cookie de sessão."""
     entrar(navegador)
@@ -153,6 +195,26 @@ def test_clique_duplo_no_confirmar_nao_gera_dois_pedidos(navegador, banco, clien
     assert "já tinha sido registrado" in resposta.get_data(as_text=True)
     assert len(banco.listar_por_prefixo("pedido:")) == 1
     assert banco.obter("produto:piata-altitude")["estoque"] == 7
+
+
+def test_reenvio_enquanto_o_pedido_processa_nao_diz_que_deu_certo(navegador, banco, cliente, catalogo):
+    """O primeiro envio ainda está no meio da saga quando chega o segundo."""
+    entrar(navegador)
+    adicionar(navegador, "piata-altitude", 2)
+    token = extrair_token(navegador.get("/checkout").get_data(as_text=True))
+
+    with navegador.session_transaction() as sessao:
+        sessao["checkout_chave"] = "em-andamento"
+    banco.salvar(pedido_de_teste("pedido:em-andamento", cliente["_id"], catalogo["farto"], 2))
+
+    resposta = navegador.post("/checkout", data={"_csrf": token}, follow_redirects=True)
+    html = resposta.get_data(as_text=True)
+
+    assert "ainda está sendo processado" in html
+    assert "já tinha sido registrado" not in html
+    with navegador.session_transaction() as sessao:
+        assert sessao["checkout_chave"] == "em-andamento"  # a mesma compra, se reenviada
+        assert sessao["carrinho"]  # nada foi dado como comprado
 
 
 def test_estoque_insuficiente_volta_ao_carrinho_dizendo_qual_cafe(navegador, banco, cliente, catalogo):

@@ -126,6 +126,9 @@ function (novo, antigo, usuario) {
   // --- pedido ----------------------------------------------------------
   if (novo.tipo === 'pedido') {
     exigir(comecaCom(novo.cliente_id, 'cliente:'), 'pedido sem cliente');
+    // O índice de pedidos por cliente ordena por criado_em, e a reconciliação
+    // decide pela idade do pedido: sem a data, o pedido some dos dois.
+    exigir(texto(novo.criado_em), 'pedido sem criado_em');
     exigir(umDe(novo.status, ['PENDENTE', 'CRIADO', 'PAGO', 'ENVIADO', 'CANCELADO']),
       'status inválido: ' + novo.status);
     exigir(Array.isArray(novo.itens) && novo.itens.length > 0, 'pedido sem itens');
@@ -156,6 +159,7 @@ function (novo, antigo, usuario) {
       exigir(antigo.itens.length === novo.itens.length, 'os itens de um pedido não podem ser alterados');
       for (var j = 0; j < novo.itens.length; j++) {
         exigir(antigo.itens[j].produto_id === novo.itens[j].produto_id &&
+          antigo.itens[j].nome === novo.itens[j].nome &&
           antigo.itens[j].moagem === novo.itens[j].moagem &&
           antigo.itens[j].quantidade === novo.itens[j].quantidade &&
           antigo.itens[j].preco_unitario_centavos === novo.itens[j].preco_unitario_centavos,
@@ -163,6 +167,8 @@ function (novo, antigo, usuario) {
       }
       exigir(antigo.cliente_id === novo.cliente_id, 'o cliente de um pedido não muda');
       exigir(antigo.status !== 'CANCELADO' || novo.status === 'CANCELADO', 'pedido cancelado não volta a valer');
+      // PENDENTE é só o começo da saga: um pedido que já saiu dele não volta.
+      exigir(antigo.status === 'PENDENTE' || novo.status !== 'PENDENTE', 'pedido não volta a PENDENTE');
     }
   }
 }

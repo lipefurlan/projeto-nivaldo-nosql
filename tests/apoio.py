@@ -2,6 +2,11 @@
 
 import re
 
+REGIOES = {
+    "chapada-diamantina": ("Chapada Diamantina", "Bahia"),
+    "sul-de-minas": ("Sul de Minas", "Minas Gerais"),
+}
+
 
 def produto_de_teste(
     slug: str,
@@ -25,7 +30,7 @@ def produto_de_teste(
         "peso_g": 250,
         "ativo": ativo,
         "categoria_id": f"categoria:{categoria}",
-        "categoria": {"nome": "Chapada Diamantina", "regiao": "Bahia"},
+        "categoria": dict(zip(("nome", "regiao"), REGIOES[categoria])),
         "reservas": {},
         "versao_esquema": 1,
     }

@@ -196,6 +196,7 @@ def validar_pedido(doc: dict) -> None:
         "pedido com _id ou tipo inválido",
     )
     _exigir(str(doc.get("cliente_id", "")).startswith("cliente:"), "pedido sem cliente")
+    _exigir(bool(str(doc.get("criado_em") or "").strip()), "pedido sem criado_em")
     _exigir(doc.get("status") in STATUS_PEDIDO, f"status inválido: {doc.get('status')}")
 
     itens = doc.get("itens")
@@ -403,11 +404,12 @@ def carrinho_detalhado() -> tuple[list[dict], int]:
     # de um GET por linha.
     produtos = banco().obter_varios(sorted({linha["produto_id"] for linha in linhas_sessao}))
 
-    linhas, total = [], 0
+    linhas, total, validas = [], 0, []
     for linha in linhas_sessao:
         produto = produtos.get(linha["produto_id"])
         if produto is None or not produto.get("ativo"):
-            continue  # o checkout trata esse caso com mensagem explícita
+            continue
+        validas.append(linha)
         subtotal = produto["preco_centavos"] * linha["quantidade"]
         total += subtotal
         linhas.append(
@@ -417,6 +419,19 @@ def carrinho_detalhado() -> tuple[list[dict], int]:
                 "moagem": linha["moagem"],
                 "subtotal": subtotal,
             }
+        )
+
+    if len(validas) < len(linhas_sessao):
+        # O café saiu do catálogo depois de entrar no carrinho. Ele sai da
+        # sessão também: senão o checkout falharia por um item que o cliente
+        # nem vê mais na tela — e não haveria botão para removê-lo.
+        gravar_carrinho(validas)
+        fora = len(linhas_sessao) - len(validas)
+        flash(
+            "Um café do seu carrinho saiu do catálogo e foi retirado."
+            if fora == 1
+            else f"{fora} itens do seu carrinho saíram do catálogo e foram retirados.",
+            "erro",
         )
     return linhas, total
 
@@ -465,14 +480,25 @@ def cadastrar_cliente(nome: str, email: str, senha: str) -> dict:
 
     try:
         b.salvar(cliente)
-    except ErroBanco:
-        # Compensação: sem isto, o e-mail ficaria preso a um cliente que
-        # nunca foi gravado, e ninguém mais conseguiria usá-lo.
+    except ErroBanco as falha:
+        # Um timeout não diz se a gravação entrou. Antes de liberar o e-mail,
+        # confere se o cliente existe: se existir, o cadastro deu certo, e
+        # apagar a chave deixaria outro cliente nascer com o mesmo e-mail.
+        try:
+            gravado = b.obter_ou_none(cliente["_id"])
+        except ErroBanco:
+            log.exception("não deu para conferir %s; a reconciliação decide", cliente["_id"])
+            raise falha
+        if gravado is not None:
+            return gravado
+
+        # Compensação: o cliente não existe, então o e-mail não pode ficar
+        # preso a ele — ninguém mais conseguiria usá-lo.
         try:
             b.apagar(chave_email["_id"], chave_email["_rev"])
         except ErroBanco:
             log.exception("%s ficou reservado; a reconciliação libera", chave_email["_id"])
-        raise
+        raise falha
 
     return cliente
 
@@ -510,8 +536,8 @@ MENSAGEM_INDISPONIVEL = (
     "Revise o carrinho e tente de novo."
 )
 MENSAGEM_INTERROMPIDO = (
-    "Não conseguimos concluir o pedido agora. Nenhum pedido foi gerado — "
-    "tente de novo em instantes."
+    "Não conseguimos concluir o pedido agora, e ele não foi confirmado. "
+    "Tente de novo em instantes."
 )
 
 
@@ -708,6 +734,18 @@ def finalizar_pedido(cliente_id: str, linhas_carrinho: list[dict], chave: str | 
     except Conflito:
         # Outra requisição com a mesma chave gravou entre a checagem e aqui.
         raise PedidoDuplicado(b.obter(pedido_id)) from None
+    except BancoIndisponivel as falha:
+        # Sem resposta, o pedido PENDENTE pode ter entrado ou não. Se entrou,
+        # é cancelado agora, enquanto ainda não há reserva nenhuma — senão ele
+        # ficaria "processando" sem estoque reservado, e um reenvio da mesma
+        # compra o trataria como pedido feito.
+        try:
+            cancelar_e_devolver(pedido_id, "Falha de comunicação ao registrar o pedido.")
+        except NaoEncontrado:
+            pass  # a gravação não entrou: não há o que desfazer
+        except ErroBanco:
+            log.exception("não deu para cancelar %s; a reconciliação cancela", pedido_id)
+        raise CheckoutInterrompido(MENSAGEM_INTERROMPIDO) from falha
 
     # --- Fases 3 e 4: reservar e confirmar -------------------------------
     try:
@@ -732,8 +770,10 @@ def finalizar_pedido(cliente_id: str, linhas_carrinho: list[dict], chave: str | 
         try:
             situacao = cancelar_e_devolver(pedido_id, motivo)
         except ErroBanco:
-            # Nem a compensação conseguiu falar com o banco. O pedido fica
-            # PENDENTE com as marcas de reserva, e `flask reconciliar` termina.
+            # Nem a compensação conseguiu falar com o banco. O pedido ficou
+            # PENDENTE, ou já CANCELADO com marcas de reserva ainda nos cafés.
+            # Nos dois casos `flask reconciliar` termina: ela cancela o que
+            # está pendente e devolve o estoque de toda marca que sobrou.
             log.exception("compensação do %s não concluiu", pedido_id)
             raise CheckoutInterrompido(MENSAGEM_INTERROMPIDO) from falha
 
@@ -1168,13 +1208,25 @@ def registrar_rotas(app: Flask) -> None:
         try:
             pedido = finalizar_pedido(session["cliente_id"], ler_carrinho(), chave=chave)
         except PedidoDuplicado as duplicado:
-            session.pop("checkout_chave", None)
-            if duplicado.pedido["status"] == "CANCELADO":
+            existente = duplicado.pedido
+            numero = numero_pedido(existente["_id"])
+
+            if existente["status"] == "CANCELADO":
+                session.pop("checkout_chave", None)
                 flash("Aquela tentativa de compra foi cancelada. Confira o carrinho e tente de novo.", "erro")
                 return redirect(url_for("carrinho"))
+
+            session["ultimo_pedido"] = existente["_id"]
+            if existente["status"] == "PENDENTE":
+                # A primeira requisição ainda está no meio da saga, ou caiu
+                # nela. Não dá para dizer que a compra deu certo: a chave e o
+                # carrinho ficam como estão até o pedido se resolver.
+                flash(f"O pedido #{numero} ainda está sendo processado. Confira o resultado em Meus pedidos.", "erro")
+                return redirect(url_for("meus_pedidos"))
+
+            session.pop("checkout_chave", None)
             gravar_carrinho([])
-            session["ultimo_pedido"] = duplicado.pedido["_id"]
-            flash(f"O pedido #{numero_pedido(duplicado.pedido['_id'])} já tinha sido registrado.", "sucesso")
+            flash(f"O pedido #{numero} já tinha sido registrado.", "sucesso")
             return redirect(url_for("meus_pedidos"))
         except ErroCheckout as erro:
             # O carrinho continua intacto de propósito: o cliente corrige a

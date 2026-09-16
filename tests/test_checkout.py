@@ -295,6 +295,114 @@ def test_confirmacao_gravada_sem_resposta_nao_e_desfeita(banco, cliente, catalog
     assert produto["reservas"] == {}
 
 
+def test_timeout_ao_registrar_o_pedido_cancela_o_que_entrou(banco, cliente, catalogo, monkeypatch):
+    """A fase 2 grava o pedido PENDENTE, mas a resposta se perde.
+
+    Sem cancelar na hora, ele ficaria "processando" sem estoque reservado —
+    e um reenvio da mesma compra o trataria como pedido feito.
+    """
+    farto = catalogo["farto"]
+    salvar = banco.salvar
+    perdeu = []
+
+    def salvar_sem_resposta(doc):
+        if doc.get("status") == "PENDENTE" and not perdeu:
+            perdeu.append(True)
+            salvar(doc)
+            raise BancoIndisponivel(0, "ReadTimeout", "a resposta se perdeu")
+        return salvar(doc)
+
+    monkeypatch.setattr(banco, "salvar", salvar_sem_resposta)
+
+    with pytest.raises(CheckoutInterrompido):
+        finalizar_pedido(cliente["_id"], [linha(farto, 2)])
+
+    [pedido] = pedidos_gravados(banco)
+    assert pedido["status"] == "CANCELADO"
+    assert banco.obter(farto["_id"])["estoque"] == 10
+
+
+def test_timeout_ao_registrar_o_pedido_que_nao_entrou_nao_deixa_nada(banco, cliente, catalogo, monkeypatch):
+    def salvar_fora_do_ar(doc):
+        raise BancoIndisponivel(0, "ConnectTimeout", "sem resposta")
+
+    monkeypatch.setattr(banco, "salvar", salvar_fora_do_ar)
+
+    with pytest.raises(CheckoutInterrompido):
+        finalizar_pedido(cliente["_id"], [linha(catalogo["farto"], 2)])
+
+    assert pedidos_gravados(banco) == []
+    assert banco.obter(catalogo["farto"]["_id"])["estoque"] == 10
+
+
+def test_checkout_desiste_depois_de_conflitos_seguidos_e_compensa(banco, cliente, catalogo, concorrente, monkeypatch):
+    """Alguém grava o Piatã antes de cada tentativa da saga, sem parar.
+
+    Depois de seis rodadas a saga desiste — e o Geisha, que tinha sido
+    reservado na primeira rodada, volta para o estoque.
+    """
+    farto, escasso = catalogo["farto"], catalogo["escasso"]
+    gravar_lote = banco.gravar_lote
+    rodadas = []
+
+    def lote_sempre_atrasado(docs):
+        if any(doc.get("reservas") for doc in docs):  # só os lotes de reserva
+            rodadas.append(True)
+            rival = concorrente.obter(farto["_id"])
+            rival["descricao"] = f"editado {len(rodadas)} vezes"
+            concorrente.salvar(rival)
+        return gravar_lote(docs)
+
+    monkeypatch.setattr(banco, "gravar_lote", lote_sempre_atrasado)
+
+    with pytest.raises(CheckoutInterrompido):
+        finalizar_pedido(cliente["_id"], [linha(farto, 1), linha(escasso, 1)])
+
+    assert len(rodadas) == 6
+    [pedido] = pedidos_gravados(banco)
+    assert pedido["status"] == "CANCELADO"
+    for produto, estoque_original in ((farto, 10), (escasso, 1)):
+        atual = banco.obter(produto["_id"])
+        assert atual["estoque"] == estoque_original
+        assert atual["reservas"] == {}
+
+
+def test_compensacao_sem_banco_fica_para_a_reconciliacao(banco, cliente, catalogo, monkeypatch):
+    """O pior caso: a reserva entra, a resposta se perde, e nem a compensação
+    alcança o banco. O pedido fica pendurado — e a reconciliação termina."""
+    farto = catalogo["farto"]
+    gravar_lote = banco.gravar_lote
+    perdeu = []
+
+    def lote_sem_resposta(docs):
+        if not perdeu:
+            perdeu.append(True)
+            gravar_lote(docs)
+            raise BancoIndisponivel(0, "ReadTimeout", "a resposta se perdeu")
+        return gravar_lote(docs)
+
+    def banco_fora_do_ar(*args, **kwargs):
+        raise BancoIndisponivel(0, "ConnectionError", "sem resposta do CouchDB")
+
+    monkeypatch.setattr(banco, "gravar_lote", lote_sem_resposta)
+    monkeypatch.setattr(banco, "atualizar", banco_fora_do_ar)
+
+    with pytest.raises(CheckoutInterrompido):
+        finalizar_pedido(cliente["_id"], [linha(farto, 3)])
+
+    [pendurado] = pedidos_gravados(banco)
+    assert pendurado["status"] == "PENDENTE"
+    assert banco.obter(farto["_id"])["estoque"] == 7
+
+    monkeypatch.undo()  # o banco voltou
+    relatorio = reconciliar(minutos=0)
+
+    assert relatorio["pedidos_cancelados"] == [pendurado["_id"]]
+    produto = banco.obter(farto["_id"])
+    assert produto["estoque"] == 10
+    assert produto["reservas"] == {}
+
+
 # ---------------------------------------------------------------------
 # 7. Idempotência
 # ---------------------------------------------------------------------
@@ -373,6 +481,24 @@ def test_reconciliacao_limpa_marca_de_pedido_confirmado_sem_mexer_no_estoque(ban
     assert relatorio["marcas_limpas"] == [f"{farto['_id']} <- {pedido['_id']}"]
     produto = banco.obter(farto["_id"])
     assert produto["estoque"] == 8
+    assert produto["reservas"] == {}
+
+
+def test_reconciliacao_devolve_reserva_de_pedido_ja_cancelado(banco, cliente, catalogo):
+    """A compensação cancelou o pedido, mas caiu antes de devolver o estoque."""
+    farto = catalogo["farto"]
+    pedido_id = "pedido:cancelado-sem-devolucao"
+    banco.salvar(pedido_de_teste(pedido_id, cliente["_id"], farto, 2, status="CANCELADO"))
+    produto = banco.obter(farto["_id"])
+    produto["estoque"] = 8
+    produto["reservas"] = {pedido_id: 2}
+    banco.salvar(produto)
+
+    relatorio = reconciliar(minutos=10)
+
+    assert relatorio["reservas_devolvidas"] == [f"{farto['_id']} <- {pedido_id}"]
+    produto = banco.obter(farto["_id"])
+    assert produto["estoque"] == 10
     assert produto["reservas"] == {}
 
 

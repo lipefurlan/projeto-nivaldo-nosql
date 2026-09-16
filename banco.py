@@ -233,6 +233,14 @@ class CouchDB:
         except ValueError:
             dados = {"error": "resposta_invalida", "reason": resposta.text[:200]}
 
+        if resposta.status_code == 202:
+            # Num cluster (o Cloudant é um), 202 quer dizer que a gravação foi
+            # aceita sem confirmação da maioria das cópias. Duas gravações
+            # quase simultâneas no mesmo documento podem terminar assim, e
+            # ficar as duas guardadas como revisões em conflito — em vez do
+            # 409 que um CouchDB de nó único daria. Fica no log para
+            # investigar; ver docs/checkout_saga.md.
+            log.warning("gravação aceita sem quórum (HTTP 202) em %s", resposta.request.path_url.split("?")[0])
         if resposta.status_code < 400:
             return dados
 
