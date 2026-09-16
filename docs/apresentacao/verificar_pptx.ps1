@@ -5,8 +5,8 @@
 # O pptxgenjs posiciona caixas por coordenada e não mede texto. Aqui o
 # PowerPoint abre o arquivo, diagrama cada caixa com as fontes de verdade e
 # informa a altura e a largura reais do texto (BoundHeight/BoundWidth), que
-# são comparadas com o tamanho da caixa. Opcionalmente exporta um PDF só para
-# conferência visual — o PDF entregue sai da versão web.
+# são comparadas com o tamanho da caixa. Opcionalmente exporta o PDF, o mesmo
+# que Arquivo > Exportar > PDF — é daí que sai o PDF entregue.
 
 param(
   [string]$Pptx = (Join-Path $PSScriptRoot "..\..\public\static\Torra_e_Terra_NoSQL.pptx"),

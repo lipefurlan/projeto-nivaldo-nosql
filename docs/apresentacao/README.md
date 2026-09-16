@@ -14,7 +14,12 @@ Duas marcações valem nos três formatos:
 |---|---|---|
 | Web | `/apresentacao` na loja | `templates/apresentacao.html` + `public/static/apresentacao.css`, sem JavaScript |
 | PowerPoint | `public/static/Torra_e_Terra_NoSQL.pptx` | `gerar.js`, com pptxgenjs, notas do apresentador em todos os slides |
-| PDF | `public/static/Torra_e_Terra_NoSQL.pdf` | a versão web impressa pelo Chrome |
+| PDF | `public/static/Torra_e_Terra_NoSQL.pdf` | o `.pptx` exportado pelo PowerPoint |
+
+**Ajuste feito à mão no PowerPoint some no próximo `npm run gerar`.** Leve a
+mudança para o `apresentacao.json` antes de gerar de novo — foi assim com os
+nomes do grupo, o endereço da loja e o cartão do WhatsApp, ajustados no
+PowerPoint e trazidos para o JSON depois.
 
 ## 1. PowerPoint e QR code
 
@@ -41,6 +46,20 @@ powershell -ExecutionPolicy Bypass -File docs/apresentacao/verificar_pptx.ps1
 ```
 
 ## 2. PDF
+
+O PDF sai do `.pptx`, pelo próprio PowerPoint: é o mesmo arquivo que o grupo
+ajusta e apresenta. Dá para exportar em **Arquivo → Exportar → PDF**, ou pelo
+script de conferência, que exporta depois de medir as caixas:
+
+```bash
+powershell -ExecutionPolicy Bypass -File docs/apresentacao/verificar_pptx.ps1 -PdfConferencia C:/caminho/completo/Torra_e_Terra_NoSQL.pdf
+```
+
+Se o PowerPoint já estiver aberto, o script usa a mesma instância, abre o
+arquivo sem janela e não fecha nada de quem está usando a máquina. Confira que
+o PDF tem exatamente 12 páginas.
+
+### Alternativa: imprimir a versão web
 
 Com a loja rodando localmente (`flask --app app run`), imprima a página com o
 Chrome sem cabeçalho e rodapé:

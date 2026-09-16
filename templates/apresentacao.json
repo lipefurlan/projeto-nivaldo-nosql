@@ -8,7 +8,7 @@
       "lema": "Do documento ao deploy",
       "texto": "O mesmo e-commerce do projeto 1, agora num banco de documentos — e o que isso muda.",
       "professor": "Prof. Nivaldo T. Marcusso",
-      "grupo": "[PREENCHER: nomes do grupo]",
+      "grupo": "Felipe Furlan; Henrique Biruel; Henrique Palorca",
       "notas": "Apresentar o grupo. Dizer em uma frase o que é o projeto: a mesma loja de café especial do projeto 1, com o banco trocado — saiu o PostgreSQL, entrou o CouchDB. A loja é a mesma de propósito: assim dá para comparar só o que mudou por causa do banco. A demonstração ao vivo fica para o final."
     },
     {
@@ -49,7 +49,7 @@
         [
           "6",
           "Deploy e documentação",
-          "Vercel, Cloudant e os documentos"
+          "Vercel, Railway e os documentos"
         ]
       ],
       "destaque": "4",
@@ -156,9 +156,9 @@
           "É o **ARQUIVO DE FICHAS**. Cada café, cliente e pedido é uma ficha completa, guardada inteira."
         ],
         [
-          "Cloudant",
-          "JSON",
-          "É o mesmo arquivo, guardado num prédio da IBM: o CouchDB rodando na nuvem."
+          "Railway",
+          "nuvem",
+          "É o **GALPÃO** alugado onde o arquivo fica, ligado dia e noite."
         ]
       ],
       "nota": "Não há tradutor no meio: o CouchDB fala HTTP, e cada leitura no banco é como abrir uma página.",
@@ -177,8 +177,8 @@
               "o arquivo de fichas"
             ],
             [
-              "IBM Cloudant",
-              "o mesmo arquivo na nuvem, plano gratuito"
+              "Railway",
+              "o galpão do CouchDB, com disco próprio"
             ],
             [
               "Mango e _explain",
@@ -216,7 +216,7 @@
           [
             [
               "pytest",
-              "109 testes"
+              "110 testes"
             ],
             [
               "GitHub Actions",
@@ -237,10 +237,10 @@
         "nome": "Claude Code",
         "detalhe": "Claude Opus 5 · Anthropic",
         "analogia": "O **PARCEIRO DE BANCADA**.",
-        "texto": "Assistente de programação com IA: escreveu código, testes, documentos e estes slides. As decisões foram do grupo — CouchDB, Vercel com Cloudant e o roteiro desta apresentação."
+        "texto": "Assistente de programação com IA: escreveu código, testes, documentos e estes slides. As decisões foram do grupo — CouchDB, Vercel com Railway e o roteiro desta apresentação."
       },
-      "nota": "Saímos do Railway por custo: Vercel e Cloudant, os dois no plano gratuito.",
-      "notas": "Toda ferramenta aqui tem um porquê. O Cloudant é citado pelo próprio material, no slide 48, como opção compatível com o CouchDB; a conta da IBM pede cartão só para verificação. Sobre o Claude Code, vale dizer com transparência como ele foi usado: ele escrevia e testava, e o grupo decidia o que entrava. Um exemplo: foi rodando a regra do banco no Node que apareceu uma regra que nunca era usada, e ela saiu. Os próprios slides foram gerados por código: o PowerPoint com o pptxgenjs, e o PDF imprimindo a versão web no Chrome."
+      "nota": "O site foi para o Vercel, grátis; só o banco continua no Railway.",
+      "notas": "Toda ferramenta aqui tem um porquê. O primeiro plano para o banco era o IBM Cloudant, que o próprio material cita no slide 48; a conta da IBM pedia cartão de crédito, e o grupo decidiu publicar sem cartão. O CouchDB foi para um container no Railway, onde o projeto 1 já rodava, e nenhuma linha de código mudou: só o endereço do banco. O site em si saiu do Railway para o Vercel, que não cobra. Sobre o Claude Code, vale dizer com transparência como ele foi usado: ele escrevia e testava, e o grupo decidia o que entrava. Um exemplo: foi rodando a regra do banco no Node que apareceu uma regra que nunca era usada, e ela saiu. Os próprios slides foram gerados por código, com o pptxgenjs, e ajustados pelo grupo no PowerPoint, de onde sai o PDF."
     },
     {
       "chave": "modelagem",
@@ -493,7 +493,7 @@
       "titulo": "O projeto em números",
       "numeros": [
         [
-          "109",
+          "110",
           "testes",
           "todos passando no CouchDB de verdade"
         ],
@@ -523,7 +523,7 @@
           "carregadas num lote só: 4 regiões e 12 cafés"
         ]
       ],
-      "latencia": "[PREENCHER: tempo de resposta no ar, medido em /saude depois do deploy]",
+      "latencia": "No ar: **20 ms** por ida ao banco — mediana de 15 medições em /saude.",
       "fora_titulo": "O que ficou de fora, de propósito",
       "fora": [
         "Pagamento e frete",
@@ -532,25 +532,25 @@
         "Reconciliação automática — hoje é um comando",
         "Mais de 50 pedidos por página"
       ],
-      "notas": "Saber o que não foi feito, e por quê, vale tanto quanto o que foi. Sobre as 8 idas ao banco: são sempre 8, com um café ou com vários, porque as reservas e a limpeza vão cada uma num lote só — e isso importa, porque o plano gratuito do Cloudant limita a 10 gravações por segundo. A reconciliação ser manual é a limitação mais honesta: em produção, ela rodaria sozinha de tempos em tempos."
+      "notas": "Saber o que não foi feito, e por quê, vale tanto quanto o que foi. Sobre as 8 idas ao banco: são sempre 8, com um café ou com vários, porque as reservas e a limpeza vão cada uma num lote só — e isso importa, porque cada ida ao banco é espera: no ar, cada uma leva uns 20 ms, com o site no Vercel e o banco no Railway, os dois na costa leste dos Estados Unidos. A reconciliação ser manual é a limitação mais honesta: em produção, ela rodaria sozinha de tempos em tempos."
     },
     {
       "chave": "demonstracao",
       "titulo": "Demonstração",
-      "url": "projeto-nivaldo-nosql.vercel.app",
+      "url": "https://projeto-nivaldo-nosql.vercel.app/",
       "passos": [
         "Catálogo e filtro por região",
         "Escolher café e moagem — a moagem vai para o item do pedido",
         "Criar conta e comprar: o pedido aparece com o preço do dia",
         "Pôr o Chapada Geisha duas vezes no carrinho e finalizar: a loja diz qual café faltou",
-        "No painel do Cloudant: a ficha do pedido e a versão do café mudando"
+        "No painel do CouchDB: a ficha do pedido e a versão do café mudando"
       ],
       "destaque": 4,
       "nota": "O Chapada Geisha está com estoque 1, de propósito.",
-      "notas": "Abrir a loja alguns minutos antes, porque a primeira visita acorda a função no Vercel. Deixar o painel do Cloudant aberto numa segunda aba, já no banco torra_terra. O passo 4 é o que mais impressiona: a mensagem diz o café que faltou, e o painel mostra que nenhum pedido novo foi gravado. No passo 5, abrir a ficha do café antes e depois de uma compra e mostrar o número antes do hífen, no _rev, subindo. No fim, o QR code do slide leva direto ao WhatsApp de quem cuida do estoque do Torra & Terra: quem quiser um dos cafés só aponta a câmera.",
+      "notas": "Abrir a loja alguns minutos antes, porque a primeira visita acorda a função no Vercel. Deixar o Fauxton, o painel do CouchDB no Railway, aberto numa segunda aba, já no banco torra_terra, e com o login feito antes: a senha não pode aparecer na tela. O passo 4 é o que mais impressiona: a mensagem diz o café que faltou, e o painel mostra que nenhum pedido novo foi gravado. No passo 5, abrir a ficha do café antes e depois de uma compra e mostrar o número antes do hífen, no _rev, subindo. No fim, o QR code do slide leva direto ao WhatsApp de quem cuida do estoque do Torra & Terra: quem quiser um dos cafés só aponta a câmera.",
       "whatsapp": {
-        "titulo": "Estoque do Torra & Terra",
-        "texto": "Aponte a câmera do celular e fale com a gente no WhatsApp.",
+        "titulo": "Torra & Terra",
+        "texto": "Aponte a câmera do celular e compre com a gente no WhatsApp.",
         "numero": "+55 19 99734-7157",
         "link": "https://wa.me/5519997347157",
         "imagem": "whatsapp_qr.svg"
