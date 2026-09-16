@@ -148,6 +148,17 @@ def app_sem_configuracao(problema: str) -> Flask:
         f"Torra & Terra: a loja está sem configuração — {problema}.\n"
         "No Vercel: Settings > Environment Variables, e depois Redeploy.\n"
     )
+    # Variável salva no painel só chega a um deploy NOVO, e só no ambiente
+    # marcado nela. Dizer qual deploy e qual ambiente estão respondendo
+    # separa "faltou marcar Production" de "faltou o Redeploy".
+    ambiente = os.getenv("VERCEL_ENV")
+    if ambiente:
+        commit = (os.getenv("VERCEL_GIT_COMMIT_SHA") or "")[:7] or "sem commit"
+        mensagem += (
+            f"Este deploy: ambiente {ambiente}, commit {commit}, "
+            f"id {os.getenv('VERCEL_DEPLOYMENT_ID') or 'desconhecido'}. "
+            f"As variáveis precisam estar marcadas para {ambiente.capitalize()}.\n"
+        )
     log.error(mensagem.strip())
 
     # A apresentação não usa banco nem sessão: continua no ar mesmo com a loja

@@ -145,6 +145,23 @@ def test_producao_sem_segredos_responde_503_dizendo_o_que_falta(monkeypatch):
     assert navegador.get("/apresentacao").status_code == 200
 
 
+def test_producao_sem_segredos_diz_qual_deploy_e_ambiente_respondem(monkeypatch):
+    """Variável salva só chega a deploy novo e do ambiente marcado nela."""
+    from app import criar_app
+
+    monkeypatch.setenv("VERCEL", "1")
+    monkeypatch.setenv("VERCEL_ENV", "production")
+    monkeypatch.setenv("VERCEL_GIT_COMMIT_SHA", "78781d0aa51c1b1e5f1d2e3f4a5b6c7d8e9f0a1b")
+    monkeypatch.setenv("VERCEL_DEPLOYMENT_ID", "dpl_teste123")
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    monkeypatch.delenv("COUCHDB_URL", raising=False)
+
+    texto = criar_app().test_client().get("/").get_data(as_text=True)
+
+    assert "ambiente production, commit 78781d0, id dpl_teste123" in texto
+    assert "marcadas para Production" in texto
+
+
 def test_producao_com_couchdb_url_mal_colada_nao_mostra_o_valor(monkeypatch):
     from app import criar_app
 
