@@ -21,6 +21,7 @@ comandos de linha de comando. A conversa HTTP com o banco fica em banco.py.
 import json
 import logging
 import os
+import re
 import secrets
 import time
 import uuid
@@ -43,6 +44,7 @@ from flask import (
     session,
     url_for,
 )
+from markupsafe import Markup, escape
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from banco import BancoIndisponivel, Conflito, CouchDB, ErroBanco, NaoEncontrado
@@ -272,6 +274,44 @@ ROTULOS_STATUS = {
     "ENVIADO": "enviado",
     "CANCELADO": "cancelado",
 }
+
+
+# ---------------------------------------------------------------------
+# Texto da apresentação
+#
+# O conteúdo dos slides mora em templates/apresentacao.json, o mesmo arquivo
+# que o gerador do PowerPoint lê. Duas marcações simples valem nos dois
+# formatos: **trecho** sai em destaque, e [PREENCHER: ...] marca uma lacuna
+# que ainda não aconteceu no projeto — visível no slide, nunca inventada.
+# ---------------------------------------------------------------------
+
+LACUNA = re.compile(r"(\[PREENCHER:[^\]]*\])")
+
+
+def texto_rico(texto: str, classe_destaque: str | None = None) -> Markup:
+    partes = []
+    for i, trecho in enumerate(str(texto).split("**")):
+        if not trecho:
+            continue
+        pedacos = []
+        for pedaco in LACUNA.split(trecho):
+            if LACUNA.fullmatch(pedaco):
+                pedacos.append(Markup('<span class="preencher">%s</span>') % pedaco)
+            elif pedaco:
+                pedacos.append(escape(pedaco))
+        conteudo = Markup("").join(pedacos)
+        if i % 2 == 1:
+            conteudo = (
+                Markup('<span class="%s">%s</span>') % (classe_destaque, conteudo)
+                if classe_destaque
+                else Markup("<strong>%s</strong>") % conteudo
+            )
+        partes.append(conteudo)
+    return Markup("").join(partes)
+
+
+def carregar_apresentacao() -> dict:
+    return json.loads((RAIZ / "templates" / "apresentacao.json").read_text(encoding="utf-8"))
 
 
 # =====================================================================
@@ -940,6 +980,8 @@ def registrar_rotas(app: Flask) -> None:
     app.jinja_env.filters["data_brasilia"] = data_brasilia
     app.jinja_env.filters["sca"] = lambda valor: f"{valor:.2f}"
     app.jinja_env.filters["status"] = lambda valor: ROTULOS_STATUS.get(valor, valor.lower())
+    app.jinja_env.filters["rico"] = texto_rico
+    app.jinja_env.filters["codigo"] = lambda linha: texto_rico(linha, "ap-codigo-destaque")
     app.jinja_env.globals["token_csrf"] = token_csrf
 
     @app.before_request
@@ -1016,6 +1058,23 @@ def registrar_rotas(app: Flask) -> None:
             estado, codigo = "indisponivel", 503
         latencia = round((time.perf_counter() - inicio) * 1000)
         return jsonify(aplicacao="ok", couchdb=estado, latencia_ms=latencia), codigo
+
+    # -----------------------------------------------------------------
+    # Apresentação do trabalho
+    #
+    # Não faz parte da loja: é a apresentação da disciplina servida pela
+    # própria aplicação, num endereço fácil de compartilhar. Sem JavaScript,
+    # como o resto do site — a navegação entre os slides é o próprio scroll.
+    # -----------------------------------------------------------------
+    @app.route("/apresentacao")
+    def apresentacao():
+        deck = carregar_apresentacao()
+        return render_template(
+            "apresentacao.html",
+            deck=deck,
+            slides={slide["chave"]: slide for slide in deck["slides"]},
+            total=len(deck["slides"]),
+        )
 
     # -----------------------------------------------------------------
     # RF01 — Catálogo

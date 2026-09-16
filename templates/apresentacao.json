@@ -1,0 +1,560 @@
+{
+  "titulo": "Torra & Terra — do documento ao deploy",
+  "arquivo": "Torra_e_Terra_NoSQL",
+  "slides": [
+    {
+      "chave": "capa",
+      "rotulo": "FACAMP · Tratamento e Armazenamento da Informação · Projeto 2",
+      "lema": "Do documento ao deploy",
+      "texto": "O mesmo e-commerce do projeto 1, agora num banco de documentos — e o que isso muda.",
+      "professor": "Prof. Nivaldo T. Marcusso",
+      "grupo": "[PREENCHER: nomes do grupo]",
+      "notas": "Apresentar o grupo. Dizer em uma frase o que é o projeto: a mesma loja de café especial do projeto 1, com o banco trocado — saiu o PostgreSQL, entrou o CouchDB. A loja é a mesma de propósito: assim dá para comparar só o que mudou por causa do banco. A demonstração ao vivo fica para o final."
+    },
+    {
+      "chave": "etapas",
+      "titulo": "Como trabalhamos",
+      "sub": "Um plano escrito antes. Depois, uma etapa por vez — cada uma com commit e testes.",
+      "etapas": [
+        [
+          "0",
+          "Requisitos e consultas",
+          "o que a loja pergunta ao banco"
+        ],
+        [
+          "1",
+          "Modelo de fichas",
+          "embutir, referenciar, fotografar"
+        ],
+        [
+          "2",
+          "CouchDB e índices",
+          "regras no banco e 4 índices"
+        ],
+        [
+          "3",
+          "Aplicação",
+          "o Flask falando HTTP com o banco"
+        ],
+        [
+          "4",
+          "Checkout",
+          "a saga, com estorno"
+        ],
+        [
+          "5",
+          "Testes e conflito",
+          "o 409 forçado de propósito"
+        ],
+        [
+          "6",
+          "Deploy e documentação",
+          "Vercel, Cloudant e os documentos"
+        ]
+      ],
+      "destaque": "4",
+      "nota": "O plano foi escrito em 9 de setembro, antes de qualquer código. A construção teve o Claude Code como parceiro de bancada, e cada etapa entrou no Git com os testes rodando.",
+      "notas": "A ordem veio do material: são as entregas 1 a 6 do projeto prático. A diferença em relação ao projeto 1 está na etapa 0. No relacional, começamos pelas tabelas; aqui, começamos pelas perguntas que o site faz ao banco — o material pede isso com todas as letras: “liste as consultas antes de modelar”. O projeto 1 inteiro continua no GitHub, na tag v1-relacional, porque comparar os dois é o objetivo da atividade."
+    },
+    {
+      "chave": "por_que_nosql",
+      "titulo": "Por que NoSQL aqui",
+      "sub": "Escolhemos pelo jeito que a loja usa os dados — o que o site mais pergunta ao banco.",
+      "cartoes": [
+        [
+          "O catálogo é lido o tempo todo",
+          "Toda visita pede a lista de cafés. Com um índice pronto para essa pergunta, a resposta sai sem juntar tabelas."
+        ],
+        [
+          "O pedido é lido inteiro, sempre",
+          "Pedido e itens nunca aparecem separados — então cabem numa ficha só, lida de uma vez."
+        ],
+        [
+          "O café tem atributos que mudam",
+          "Nota sensorial, pontuação, moagem: uma ficha aceita um campo novo sem reformar o arquivo inteiro."
+        ]
+      ],
+      "consultas_titulo": "As perguntas, listadas antes de desenhar as fichas",
+      "consultas": [
+        [
+          "Quais cafés estão à venda?",
+          "idx_produtos_catalogo"
+        ],
+        [
+          "Quais cafés desta região?",
+          "idx_produtos_categoria"
+        ],
+        [
+          "Quem é o cliente deste e-mail?",
+          "idx_clientes_email"
+        ],
+        [
+          "Quais são os pedidos deste cliente?",
+          "idx_pedidos_cliente"
+        ]
+      ],
+      "nota": "O que se perde: o “tudo ou nada” entre fichas diferentes. O slide 8 mostra como resolvemos.",
+      "notas": "O material exige justificar o NoSQL pelo padrão de acesso — e padrão de acesso é só isto: o que o site mais pergunta ao banco. Para explicar índice: é o índice remissivo de um livro; em vez de folhear tudo, você vai direto à página. Ser honesto aqui conta ponto: a ficha é ótima para ler o pedido inteiro de uma vez, mas perde a garantia de gravar várias fichas juntas. O resto da apresentação mostra o que fizemos com essa perda."
+    },
+    {
+      "chave": "arquitetura",
+      "titulo": "Como o site funciona por dentro",
+      "sub": "O caminho que um clique percorre — do navegador até a ficha guardada no banco.",
+      "fluxo": [
+        [
+          "Navegador",
+          "o cliente clica",
+          false
+        ],
+        [
+          "Vercel",
+          "recebe o acesso",
+          false
+        ],
+        [
+          "Flask",
+          "decide o que fazer",
+          true
+        ],
+        [
+          "requests",
+          "leva o pedido ao banco",
+          false
+        ],
+        [
+          "CouchDB",
+          "guarda as fichas",
+          true
+        ]
+      ],
+      "volta": "E na volta, o Jinja encaixa a resposta na página que o cliente vê.",
+      "pecas_titulo": "O que é cada peça, em uma frase",
+      "pecas": [
+        [
+          "Vercel",
+          "nuvem",
+          "É o **PORTEIRO**. Recebe cada acesso da internet e acorda o Python para atender."
+        ],
+        [
+          "Flask",
+          "Python",
+          "É o **CÉREBRO**. Decide o que responder, e é onde moram as regras."
+        ],
+        [
+          "Jinja",
+          "HTML",
+          "É o **MOLDE** da página. Encaixa o dado no HTML que o cliente vê."
+        ],
+        [
+          "requests",
+          "Python",
+          "É o **CARTEIRO**. Leva cada pedido ao CouchDB por HTTP, como se o banco fosse um site."
+        ],
+        [
+          "CouchDB",
+          "JSON",
+          "É o **ARQUIVO DE FICHAS**. Cada café, cliente e pedido é uma ficha completa, guardada inteira."
+        ],
+        [
+          "Cloudant",
+          "JSON",
+          "É o mesmo arquivo, guardado num prédio da IBM: o CouchDB rodando na nuvem."
+        ]
+      ],
+      "nota": "Não há tradutor no meio: o CouchDB fala HTTP, e cada leitura no banco é como abrir uma página.",
+      "notas": "No projeto 1, o porteiro era o gunicorn, rodando num servidor ligado o tempo todo. No Vercel não existe servidor esperando: a própria plataforma recebe o acesso e acorda o Python quando alguém chega. Também sumiram o SQLAlchemy, o tradutor, e o psycopg, o cabo. O CouchDB não precisa de tradutor, porque a língua dele é o HTTP, a mesma de qualquer site. Por isso o carteiro é o requests, a biblioteca que o Python usa para abrir endereços da web."
+    },
+    {
+      "chave": "ferramentas",
+      "titulo": "Ferramentas",
+      "sub": "O que usamos em cada etapa, e para quê.",
+      "grupos": [
+        [
+          "Modelagem e banco",
+          [
+            [
+              "Apache CouchDB 3.5",
+              "o arquivo de fichas"
+            ],
+            [
+              "IBM Cloudant",
+              "o mesmo arquivo na nuvem, plano gratuito"
+            ],
+            [
+              "Mango e _explain",
+              "a busca, e a prova de qual índice ela usou"
+            ],
+            [
+              "Fauxton",
+              "o painel das fichas e das versões"
+            ]
+          ]
+        ],
+        [
+          "Desenvolvimento",
+          [
+            [
+              "Flask e Jinja",
+              "o cérebro e o molde"
+            ],
+            [
+              "requests",
+              "o carteiro até o banco"
+            ],
+            [
+              "python-dotenv",
+              "senhas fora do código"
+            ],
+            [
+              "Git e GitHub",
+              "o histórico, com o projeto 1 guardado"
+            ]
+          ]
+        ],
+        [
+          "Qualidade e operação",
+          [
+            [
+              "pytest",
+              "107 testes"
+            ],
+            [
+              "GitHub Actions",
+              "testa no CouchDB de verdade a cada envio"
+            ],
+            [
+              "Node.js",
+              "roda a regra do banco fora dele, para testá-la"
+            ],
+            [
+              "Vercel",
+              "publica o site a cada envio"
+            ]
+          ]
+        ]
+      ],
+      "ia": {
+        "nome": "Claude Code",
+        "detalhe": "Claude Opus 5 · Anthropic",
+        "analogia": "O **PARCEIRO DE BANCADA**.",
+        "texto": "Assistente de programação com IA: escreveu código, testes, documentos e estes slides. As decisões foram do grupo — CouchDB, Vercel com Cloudant e o roteiro desta apresentação."
+      },
+      "nota": "Saímos do Railway por custo: Vercel e Cloudant, os dois no plano gratuito.",
+      "notas": "Toda ferramenta aqui tem um porquê. O Cloudant é citado pelo próprio material, no slide 48, como opção compatível com o CouchDB; a conta da IBM pede cartão só para verificação. Sobre o Claude Code, vale dizer com transparência como ele foi usado: ele escrevia e testava, e o grupo decidia o que entrava. Um exemplo: foi rodando a regra do banco no Node que apareceu uma regra que nunca era usada, e ela saiu. Os próprios slides foram gerados por código: o PowerPoint com o pptxgenjs, e o PDF imprimindo a versão web no Chrome."
+    },
+    {
+      "chave": "modelagem",
+      "titulo": "Modelagem documental",
+      "sub": "Cinco tipos de ficha: três principais e duas de apoio.",
+      "fichas": [
+        [
+          "produto",
+          [
+            "{",
+            "  \"_id\": \"produto:chapada-geisha\",",
+            "  \"nome\": \"Chapada Geisha\",",
+            "  \"preco_centavos\": 14800,",
+            "  \"estoque\": 1",
+            "}"
+          ]
+        ],
+        [
+          "cliente",
+          [
+            "{",
+            "  \"_id\": \"cliente:3f2c…\",",
+            "  \"nome\": \"Ana\",",
+            "  \"email\": \"ana@exemplo.com\",",
+            "  \"senha_hash\": \"scrypt:…\"",
+            "}"
+          ]
+        ],
+        [
+          "pedido",
+          [
+            "{",
+            "  \"_id\": \"pedido:9b1d…\",",
+            "  \"cliente_id\": \"cliente:3f2c…\",",
+            "  \"status\": \"CRIADO\",",
+            "  \"itens\": [{",
+            "    \"nome\": \"Chapada Geisha\",",
+            "    \"preco_unitario_centavos\": 14800,",
+            "    **\"moagem\": \"FINA\",**",
+            "    \"quantidade\": 1",
+            "  }]",
+            "}"
+          ]
+        ]
+      ],
+      "moagem": "A moagem continua no item: o cliente escolhe na compra.",
+      "decisoes": [
+        [
+          "Embutir",
+          "os itens moram dentro do pedido",
+          "Grampeados na ficha: são lidos e alterados juntos."
+        ],
+        [
+          "Referenciar",
+          "o pedido anota o cliente_id",
+          "Como anotar o número da ficha do cliente: ele tem vida própria."
+        ],
+        [
+          "Fotografar",
+          "nome e preço copiados no item",
+          "Uma foto do dia da compra: o preço de amanhã não muda o pedido de hoje."
+        ]
+      ],
+      "apoio": "Fichas de apoio: categoria (a região) e email:<endereço>, que garante e-mail único. Dinheiro em centavos: o JSON não tem número decimal exato.",
+      "notas": "É o slide de maior peso na nota: modelagem documental vale 25%. As três decisões resumem tudo: embutir o que é lido junto, referenciar o que tem vida própria, fotografar o que precisa ficar como estava no dia. A moagem é o argumento herdado do projeto 1: ela não é do café, é da compra — por isso continua dentro do item. Se perguntarem pelo _id: é a etiqueta da ficha, e quem escolhe o nome somos nós. Produto:chapada-geisha é legível, e nenhuma outra ficha pode ter a mesma etiqueta — é justamente isso que garante o e-mail único."
+    },
+    {
+      "chave": "comparacao",
+      "titulo": "O que mudou em relação ao PostgreSQL",
+      "sub": "Os dois guardam regras. A diferença real é o “tudo ou nada”.",
+      "analogias": [
+        [
+          "PostgreSQL · projeto 1",
+          "Um cofre com regras e uma tranca para o pedido inteiro."
+        ],
+        [
+          "CouchDB · projeto 2",
+          "Um arquivo de fichas com um conferente na porta: confere cada ficha sozinha, mas não enxerga o conjunto."
+        ]
+      ],
+      "linhas": [
+        [
+          "Estrutura",
+          "5 tabelas ligadas",
+          "fichas JSON completas"
+        ],
+        [
+          "Identidade",
+          "número automático: 1, 2, 3…",
+          "etiqueta escolhida: produto:chapada-geisha"
+        ],
+        [
+          "Relacionamento",
+          "chave estrangeira e JOIN",
+          "embutir, referenciar ou fotografar"
+        ],
+        [
+          "Consulta",
+          "SQL",
+          "Mango: um JSON enviado por HTTP"
+        ],
+        [
+          "Índice",
+          "CREATE INDEX",
+          "um índice para cada pergunta"
+        ],
+        [
+          "Regras",
+          "CHECK: o cofre recusa",
+          "validate_doc_update: o conferente recusa"
+        ],
+        [
+          "Concorrência",
+          "FOR UPDATE: tranca a gaveta",
+          "_rev: o número da versão; quem chega atrasado recebe 409"
+        ],
+        [
+          "Tudo ou nada",
+          "a transação inteira",
+          "uma ficha de cada vez"
+        ]
+      ],
+      "notas": "Ler a tabela pelas analogias. Nas regras, os dois recusam dado errado: no PostgreSQL é o CHECK; no CouchDB é uma função JavaScript que o próprio banco roda a cada gravação, a validate_doc_update. Temos 35 regras nela, testadas contra o CouchDB de verdade. A linha que importa é a última: o PostgreSQL grava várias tabelas como se fosse uma coisa só; o CouchDB garante uma ficha de cada vez. Um pedido de três cafés mexe em quatro fichas — e nada garante as quatro juntas. É o assunto do próximo slide."
+    },
+    {
+      "chave": "checkout",
+      "titulo": "O checkout — o coração do trabalho",
+      "sub": "No CouchDB não existe “tudo ou nada” entre fichas diferentes.",
+      "risco": [
+        "O risco",
+        "O pedido grava, a baixa de estoque falha: sobra pedido sem estoque descontado."
+      ],
+      "base": [
+        "O projeto-base do material",
+        "Manda tudo num lote só e, se der conflito, só avisa o cliente. O que já foi gravado fica gravado."
+      ],
+      "passos": [
+        [
+          "1",
+          "Conferir",
+          "cafés e estoque, sem gravar nada"
+        ],
+        [
+          "2",
+          "Anotar",
+          "o pedido nasce “processando”"
+        ],
+        [
+          "3",
+          "Reservar",
+          "baixa o estoque e prende um bilhete do pedido na ficha do café"
+        ],
+        [
+          "4",
+          "Confirmar",
+          "o pedido vira “criado” e não volta atrás"
+        ],
+        [
+          "5",
+          "Limpar",
+          "tira os bilhetes"
+        ]
+      ],
+      "estorno": [
+        "Falhou no 3 ou no 4?",
+        "Cancela o pedido e estorna o estoque — só onde houver bilhete."
+      ],
+      "retry": [
+        "Conflito 409 no 3?",
+        "Relê a ficha do café e tenta de novo."
+      ],
+      "rodape": "Clique duplo não compra duas vezes: o número do pedido nasce quando a tela abre, e o banco não aceita dois pedidos com o mesmo número.",
+      "notas": "Este é o coração. Começar pelo risco: sem transação, o pedido pode ficar gravado sem o estoque ter sido descontado. O projeto-base do material faz exatamente isso: avisa o conflito, mas não desfaz o que já entrou — e tentar de novo desconta duas vezes. A nossa solução se chama saga: uma sequência de passos em que cada passo sabe se desfazer. O detalhe que faz funcionar é o bilhete. Se a conexão cai no meio da reserva, a loja não sabe o que o banco gravou; o bilhete preso na ficha do café diz. O estorno devolve estoque só onde encontra bilhete, e por isso pode rodar duas vezes sem devolver em dobro. Se a função morrer no meio, um comando — reconciliar — termina o serviço depois."
+    },
+    {
+      "chave": "conflito",
+      "titulo": "O teste de conflito",
+      "sub": "Duas compras disputando o último Chapada Geisha — forçadas de propósito, no instante exato.",
+      "passos": [
+        [
+          "A Ana confere o carrinho",
+          "Geisha: estoque 1, versão 1. Piatã: estoque 10."
+        ],
+        [
+          "Outra compra chega antes",
+          "leva o último Geisha, e a ficha vira versão 2"
+        ],
+        [
+          "A Ana reserva com a versão velha",
+          "o Piatã entra; o Geisha volta com 409: “essa ficha mudou desde que você leu”"
+        ],
+        [
+          "A loja relê o Geisha",
+          "estoque 0"
+        ],
+        [
+          "Estorno",
+          "o pedido da Ana é cancelado, e o Piatã volta a 10"
+        ],
+        [
+          "A Ana vê a mensagem",
+          "“Estoque insuficiente de Chapada Geisha”"
+        ]
+      ],
+      "resultados": [
+        [
+          "Resultado real",
+          "Passou no Apache CouchDB 3.5.2 de verdade, no GitHub Actions.",
+          "test_cafe_que_acaba_no_meio_da_saga_e_compensado"
+        ],
+        [
+          "Se ainda sobra estoque",
+          "A loja só relê e tenta de novo: 10 − 4 da outra compra − 3 desta = 3. Nenhuma baixa se perde.",
+          "test_conflito_409_e_resolvido_relendo_o_documento"
+        ]
+      ],
+      "notas": "Explicar o 409 com a analogia: o _rev é o número da versão da ficha. Quem grava precisa dizer qual versão leu; se alguém mexeu antes, o banco recusa — e isso é o erro 409. Não é falha, é o banco avisando. O teste força a corrida no instante exato: ele troca a função que grava por uma que, antes de gravar, faz a outra compra acontecer. Por isso o resultado é sempre o mesmo e não depende de sorte. Os dois testes rodam a cada envio ao GitHub, contra um CouchDB de verdade. Se houver tempo, o Fauxton mostra o mesmo 409 com duas abas editando a mesma ficha."
+    },
+    {
+      "chave": "problemas",
+      "titulo": "Problemas encontrados e como resolvemos",
+      "sub": "Quatro problemas de verdade, cada um com a solução testada.",
+      "problemas": [
+        [
+          "O checkout do projeto-base deixava pedido pela metade",
+          "Um conflito no meio do lote avisava o cliente, mas não desfazia o que já tinha entrado.",
+          "Saga com estorno, e um teste para cada jeito de falhar."
+        ],
+        [
+          "A máquina do grupo não tem Docker",
+          "O material sobe o CouchDB com Docker. Sem ele, não havia banco para testar.",
+          "Uma maquete do banco para testar em qualquer lugar, e o CouchDB de verdade no GitHub Actions a cada envio."
+        ],
+        [
+          "O CouchDB não tem “e-mail único”",
+          "Consultar antes de gravar não basta: dois cadastros ao mesmo tempo passariam juntos.",
+          "Uma ficha cuja etiqueta é o próprio e-mail. Duas fichas com a mesma etiqueta não existem."
+        ],
+        [
+          "A resposta se perdeu: gravou ou não?",
+          "Se a conexão cai no meio da reserva, a loja não sabe o que o banco guardou.",
+          "O bilhete de reserva na ficha do café diz exatamente o que entrou."
+        ]
+      ],
+      "rodape": "E dois menores: a pasta nova ficava dentro da antiga e lia a senha errada · uma regra do banco que nunca era usada, achada rodando a função no Node.",
+      "notas": "Contar como história, um de cada vez. O terceiro rende boa conversa: no PostgreSQL, o UNIQUE resolvia; no CouchDB, a única coisa que o banco garante ser única é a etiqueta da ficha — então a etiqueta passou a ser o próprio e-mail. O primeiro dos menores é o tipo de erro que só aparece rodando: o arquivo de senhas do projeto 1 estava sendo lido pelo projeto 2, porque uma pasta mora dentro da outra. Corrigimos apontando o caminho exato do arquivo."
+    },
+    {
+      "chave": "numeros",
+      "titulo": "O projeto em números",
+      "numeros": [
+        [
+          "107",
+          "testes",
+          "todos passando no CouchDB de verdade"
+        ],
+        [
+          "35",
+          "regras",
+          "conferidas pelo próprio banco"
+        ],
+        [
+          "8",
+          "idas ao banco",
+          "para confirmar uma compra, com um café ou com vários"
+        ],
+        [
+          "4",
+          "índices",
+          "um para cada pergunta"
+        ],
+        [
+          "5",
+          "tipos de ficha",
+          "3 principais e 2 de apoio"
+        ],
+        [
+          "16",
+          "fichas",
+          "carregadas num lote só: 4 regiões e 12 cafés"
+        ]
+      ],
+      "latencia": "[PREENCHER: tempo de resposta no ar, medido em /saude depois do deploy]",
+      "fora_titulo": "O que ficou de fora, de propósito",
+      "fora": [
+        "Pagamento e frete",
+        "Área administrativa",
+        "Carrinho guardado no banco — ele fica na sessão",
+        "Reconciliação automática — hoje é um comando",
+        "Mais de 50 pedidos por página"
+      ],
+      "notas": "Saber o que não foi feito, e por quê, vale tanto quanto o que foi. Sobre as 8 idas ao banco: são sempre 8, com um café ou com vários, porque as reservas e a limpeza vão cada uma num lote só — e isso importa, porque o plano gratuito do Cloudant limita a 10 gravações por segundo. A reconciliação ser manual é a limitação mais honesta: em produção, ela rodaria sozinha de tempos em tempos."
+    },
+    {
+      "chave": "demonstracao",
+      "titulo": "Demonstração",
+      "url": "[PREENCHER: endereço da loja no Vercel]",
+      "passos": [
+        "Catálogo e filtro por região",
+        "Escolher café e moagem — a moagem vai para o item do pedido",
+        "Criar conta e comprar: o pedido aparece com o preço do dia",
+        "Pôr o Chapada Geisha duas vezes no carrinho e finalizar: a loja diz qual café faltou",
+        "No painel do Cloudant: a ficha do pedido e a versão do café mudando"
+      ],
+      "destaque": 4,
+      "nota": "O Chapada Geisha está com estoque 1, de propósito.",
+      "notas": "Abrir a loja alguns minutos antes, porque a primeira visita acorda a função no Vercel. Deixar o painel do Cloudant aberto numa segunda aba, já no banco torra_terra. O passo 4 é o que mais impressiona: a mensagem diz o café que faltou, e o painel mostra que nenhum pedido novo foi gravado. No passo 5, abrir a ficha do café antes e depois de uma compra e mostrar o número antes do hífen, no _rev, subindo. No fim, o QR code do slide leva direto ao WhatsApp de quem cuida do estoque do Torra & Terra: quem quiser um dos cafés só aponta a câmera.",
+      "whatsapp": {
+        "titulo": "Estoque do Torra & Terra",
+        "texto": "Aponte a câmera do celular e fale com a gente no WhatsApp.",
+        "numero": "+55 19 99734-7157",
+        "link": "https://wa.me/5519997347157",
+        "imagem": "whatsapp_qr.svg"
+      }
+    }
+  ]
+}

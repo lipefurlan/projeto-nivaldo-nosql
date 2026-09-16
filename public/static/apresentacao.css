@@ -1,0 +1,548 @@
+/* =====================================================================
+   Apresentação — Torra & Terra, versão NoSQL
+
+   Slides em HTML e CSS puros. A loja usa Content-Security-Policy com
+   script-src 'none', então esta página também não tem JavaScript: a
+   navegação é o próprio scroll, com scroll-snap prendendo um slide por
+   tela. As cores são as variáveis do style.css.
+
+   Nenhum style="..." no HTML: a mesma política não tem 'unsafe-inline'
+   em style-src, e o navegador ignoraria o estilo inline em silêncio.
+
+   Todo tamanho sai de uma unidade só, --u. Na tela ela vale
+   min(1vw, 1.78vh): o slide inteiro escala para caber numa tela 16:9, seja
+   ela larga ou baixa. Na impressão, de onde sai o PDF, --u é fixo em pt —
+   unidade de viewport sai errada no papel, e com ela o conteúdo vazava de
+   uma página para a outra.
+   ===================================================================== */
+
+html { scroll-snap-type: y mandatory; }
+
+body.apresentacao { background: var(--ink); }
+
+/* O style.css dá ao <main> da loja um respiro de 40 px em cima, 24 px nas
+   laterais e 96 px embaixo. Na apresentação isso deslocava cada slide: no
+   PDF, a capa descia 10,6 mm e empurrava uma faixa para a página seguinte,
+   e sobrava uma página em branco no fim. Slide encosta na borda. */
+.slides { --u: min(1vw, 1.78vh); display: block; margin: 0; padding: 0; }
+
+.slide {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: calc(var(--u) * 3.6) calc(var(--u) * 5.4);
+  background: var(--bg);
+  color: var(--ink);
+  border-bottom: 1px solid var(--line);
+  scroll-snap-align: start;
+}
+
+.slide-escuro {
+  background: var(--ink);
+  color: #fff;
+  border-bottom-color: #2a2622;
+}
+
+.slide-interno { width: 100%; margin: 0 auto; }
+
+/* --- tipografia -------------------------------------------------------- */
+
+.ap-titulo {
+  margin: 0 0 calc(var(--u) * 0.4);
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: calc(var(--u) * 2.9);
+  font-weight: 400;
+  line-height: 1.08;
+}
+
+.ap-sub {
+  margin: 0 0 calc(var(--u) * 1.5);
+  font-size: calc(var(--u) * 1.15);
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.ap-rotulo {
+  margin: 0 0 calc(var(--u) * 0.45);
+  font-size: calc(var(--u) * 0.78);
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.ap-rotulo-destaque { color: var(--accent); }
+.ap-rotulo-ok { color: var(--ok); }
+.ap-rotulo-erro { color: var(--erro); }
+
+.ap-texto { margin: 0; font-size: calc(var(--u) * 1.15); line-height: 1.45; }
+
+.ap-nota {
+  margin: calc(var(--u) * 1.2) 0 0;
+  font-size: calc(var(--u) * 1);
+  font-style: italic;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.ap-texto-forte { color: var(--ink); }
+
+code, .ap-codigo, .ap-teste {
+  font-family: ui-monospace, Consolas, "Cascadia Mono", monospace;
+}
+
+/* Lacuna honesta: o que ainda não aconteceu no projeto aparece marcado. */
+.preencher {
+  display: inline-block;
+  padding: 0 calc(var(--u) * 0.5);
+  border: 1px dashed var(--erro);
+  border-radius: var(--r-sm);
+  background: var(--erro-soft);
+  color: var(--erro);
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 0.8em;
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.ap-pagina {
+  position: absolute;
+  right: calc(var(--u) * 5.4);
+  bottom: calc(var(--u) * 1.4);
+  margin: 0;
+  font-size: calc(var(--u) * 0.78);
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+/* --- cartões e bolhas ------------------------------------------------ */
+
+.ap-cartao {
+  padding: calc(var(--u) * 1.05) calc(var(--u) * 1.2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+.ap-cartao-destaque { background: var(--accent-soft); }
+.ap-cartao-ok { background: var(--ok-soft); }
+.ap-cartao-erro { background: var(--erro-soft); }
+
+.ap-cartao-titulo {
+  display: block;
+  margin: 0 0 calc(var(--u) * 0.15);
+  font-size: calc(var(--u) * 1.1);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--ink);
+}
+
+.ap-cartao-texto {
+  display: block;
+  margin: 0;
+  font-size: calc(var(--u) * 0.94);
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.ap-bolha {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: calc(var(--u) * 2.1);
+  height: calc(var(--u) * 2.1);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: calc(var(--u) * 0.95);
+  font-weight: 600;
+  font-style: normal;
+}
+.ap-cartao-destaque .ap-bolha { background: var(--surface); }
+.ap-bolha-ok { background: var(--ok-soft); color: var(--ok); }
+.ap-bolha-erro { background: var(--erro-soft); color: var(--erro); }
+
+/* --- grades ------------------------------------------------------------ */
+
+.ap-colunas,
+.ap-grade-2,
+.ap-grade-3,
+.ap-numeros,
+.ap-modelo,
+.ap-pilha,
+.ap-etapas,
+.ap-passos {
+  display: grid;
+  gap: calc(var(--u) * 1.05);
+  grid-template-columns: 1fr;
+}
+.ap-pilha { align-content: start; }
+
+.ap-colunas + .ap-colunas,
+.ap-passos + .ap-colunas,
+.ap-colunas + .ap-passos,
+.ap-colunas + .ap-tabela,
+.ap-grade-3 + .ap-ia { margin-top: calc(var(--u) * 1.05); }
+
+/* --- 2 · etapas -------------------------------------------------------- */
+
+.ap-etapas { margin: 0; padding: 0; list-style: none; }
+.ap-etapas .ap-bolha { margin-bottom: calc(var(--u) * 0.55); }
+.ap-etapas-nota {
+  align-self: center;
+  font-size: calc(var(--u) * 0.98);
+  font-style: italic;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+/* --- tabelas ----------------------------------------------------------- */
+
+.ap-tabela { width: 100%; border-collapse: collapse; }
+.ap-tabela th,
+.ap-tabela td {
+  padding: calc(var(--u) * 0.48) calc(var(--u) * 1.05) calc(var(--u) * 0.48) 0;
+  border-bottom: 1px solid var(--line);
+  font-size: calc(var(--u) * 1);
+  line-height: 1.4;
+  text-align: left;
+  vertical-align: top;
+}
+.ap-tabela tr:last-child th,
+.ap-tabela tr:last-child td { border-bottom: none; }
+.ap-tabela th { font-weight: 600; white-space: nowrap; }
+.ap-tabela td { color: var(--muted); }
+.ap-tabela code { font-size: 0.92em; color: var(--accent); }
+
+.ap-tabela-consultas td:first-child { color: var(--ink); }
+
+.ap-lingua { font-family: ui-monospace, Consolas, monospace; color: var(--accent) !important; white-space: nowrap; }
+.ap-tabela-pecas strong { color: var(--ink); font-weight: 600; }
+
+.ap-tabela-comparacao thead th {
+  font-size: calc(var(--u) * 0.78);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.ap-tabela-comparacao td:last-child { color: var(--ink); }
+.ap-linha-forte th,
+.ap-linha-forte td { color: var(--accent) !important; font-weight: 600; }
+
+/* --- 4 · fluxo --------------------------------------------------------- */
+
+.ap-fluxo {
+  display: grid;
+  gap: calc(var(--u) * 2);
+  grid-template-columns: 1fr;
+  margin: 0 0 calc(var(--u) * 0.6);
+  padding: 0;
+  list-style: none;
+}
+.ap-fluxo-item {
+  position: relative;
+  padding: calc(var(--u) * 0.7) calc(var(--u) * 0.5);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  text-align: center;
+}
+.ap-fluxo-item strong { display: block; font-size: calc(var(--u) * 1.1); }
+.ap-fluxo-item span { font-size: calc(var(--u) * 0.88); color: var(--muted); }
+.ap-fluxo-item-forte { background: var(--accent-soft); }
+.ap-fluxo-item-forte strong { color: var(--accent); }
+.ap-fluxo-item + .ap-fluxo-item::before {
+  content: "›";
+  position: absolute;
+  top: calc(var(--u) * -2);
+  left: 50%;
+  width: calc(var(--u) * 2);
+  font-size: calc(var(--u) * 1.5);
+  line-height: calc(var(--u) * 2);
+  text-align: center;
+  transform: translateX(-50%) rotate(90deg);
+  color: var(--line-forte);
+}
+
+.ap-volta { margin: 0 0 calc(var(--u) * 1.1); font-size: calc(var(--u) * 0.92); color: var(--muted); }
+
+/* --- 5 · ferramentas --------------------------------------------------- */
+
+.ap-ferramentas { margin: 0; }
+.ap-ferramentas dt {
+  margin-top: calc(var(--u) * 0.55);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: calc(var(--u) * 0.98);
+  font-weight: 600;
+}
+.ap-ferramentas dt:first-child { margin-top: 0; }
+.ap-ferramentas dd { margin: 0; font-size: calc(var(--u) * 0.9); line-height: 1.4; color: var(--muted); }
+
+.ap-ia { display: grid; gap: calc(var(--u) * 0.4) calc(var(--u) * 2); grid-template-columns: 1fr; align-items: center; }
+.ap-ia-nome {
+  margin: 0;
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: calc(var(--u) * 2.1);
+  line-height: 1.1;
+}
+.ap-ia-nome span {
+  display: block;
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: calc(var(--u) * 0.72);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.ap-ia strong { color: var(--accent); }
+
+/* --- 6 · modelagem ----------------------------------------------------- */
+
+.ap-ficha { margin: 0; }
+.ap-codigo {
+  margin: 0;
+  padding: calc(var(--u) * 0.8) calc(var(--u) * 0.95);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  font-size: calc(var(--u) * 0.84);
+  line-height: 1.45;
+  white-space: pre;
+  overflow-x: auto;
+  color: var(--ink);
+}
+.ap-codigo-destaque {
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+}
+.ap-moagem { margin: calc(var(--u) * 0.55) 0 0; font-size: calc(var(--u) * 0.95); font-weight: 600; color: var(--accent); }
+
+/* --- 7 · comparação ---------------------------------------------------- */
+
+.ap-frase {
+  margin: 0;
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: calc(var(--u) * 1.45);
+  line-height: 1.2;
+}
+
+/* --- 8 · checkout ------------------------------------------------------ */
+
+.ap-passos { margin: 0; padding: 0; list-style: none; }
+.ap-passo {
+  padding: calc(var(--u) * 0.85);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.ap-passo .ap-bolha { margin-bottom: calc(var(--u) * 0.4); }
+
+/* --- 9 · linha do tempo ------------------------------------------------ */
+
+.ap-linha-do-tempo { display: grid; gap: calc(var(--u) * 0.7); margin: 0; padding: 0; list-style: none; }
+.ap-linha-do-tempo li { display: flex; gap: calc(var(--u) * 0.85); align-items: flex-start; }
+.ap-linha-do-tempo p { margin: calc(var(--u) * 0.3) 0 0; font-size: calc(var(--u) * 1); line-height: 1.4; color: var(--muted); }
+.ap-linha-do-tempo strong { color: var(--ink); font-weight: 600; }
+.ap-teste {
+  display: block;
+  margin-top: calc(var(--u) * 0.55);
+  font-size: calc(var(--u) * 0.78);
+  color: var(--ok);
+  overflow-wrap: anywhere;
+}
+
+/* --- 10 · problemas ---------------------------------------------------- */
+
+.ap-problema { display: flex; gap: calc(var(--u) * 1); align-items: flex-start; }
+.ap-problema .ap-cartao-texto + .ap-cartao-texto { margin-top: calc(var(--u) * 0.4); }
+.ap-solucao { color: var(--ok); font-weight: 500; }
+
+/* --- 11 · números ------------------------------------------------------ */
+
+.ap-numero {
+  display: block;
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: calc(var(--u) * 3.1);
+  line-height: 1;
+  color: var(--accent);
+}
+
+.ap-lista { margin: 0; padding: 0; list-style: none; }
+.ap-lista li {
+  position: relative;
+  margin-bottom: calc(var(--u) * 0.55);
+  padding-left: calc(var(--u) * 1.2);
+  font-size: calc(var(--u) * 1);
+  line-height: 1.4;
+  color: var(--ink);
+}
+.ap-lista li::before {
+  content: "";
+  position: absolute;
+  top: 0.55em;
+  left: 0;
+  width: calc(var(--u) * 0.45);
+  height: calc(var(--u) * 0.45);
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+/* --- 1 e 12 · capa e demonstração ------------------------------------ */
+
+.slide-escuro .ap-rotulo,
+.slide-escuro .ap-pagina,
+.slide-escuro .ap-nota { color: #9b928a; }
+
+.ap-marca {
+  margin: 0 0 calc(var(--u) * 0.5);
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: calc(var(--u) * 6.9);
+  font-weight: 400;
+  line-height: 1;
+}
+.ap-marca span { color: var(--accent); }
+
+.ap-lema {
+  margin: 0 0 calc(var(--u) * 1.3);
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: calc(var(--u) * 2.9);
+  line-height: 1.1;
+  color: var(--accent);
+}
+
+.ap-capa-texto { max-width: 60ch; color: #c9c2bb; }
+.ap-assinatura { margin: calc(var(--u) * 1.3) 0 0; font-size: calc(var(--u) * 1); color: #9b928a; }
+
+.ap-baixar { display: flex; flex-wrap: wrap; gap: 10px; margin-top: calc(var(--u) * 2.2); }
+.ap-baixar .botao { width: auto; }
+.slide-escuro .botao-secundario { border-color: #4a443e; color: #fff; }
+.slide-escuro .botao-secundario:hover { border-color: #9b928a; }
+
+.ap-url {
+  margin: 0 0 calc(var(--u) * 1.8);
+  font-size: calc(var(--u) * 1.65);
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.ap-whatsapp { justify-self: center; align-self: center; text-align: center; }
+.ap-whatsapp img { display: block; width: calc(var(--u) * 14); height: auto; margin: 0 auto calc(var(--u) * 0.7); }
+.ap-whatsapp .ap-cartao-texto { max-width: calc(var(--u) * 18); margin: calc(var(--u) * 0.3) auto calc(var(--u) * 0.55); }
+.ap-whatsapp-numero { font-size: calc(var(--u) * 1.05); font-weight: 600; color: var(--accent); text-decoration: none; }
+.ap-whatsapp-numero:hover { text-decoration: underline; }
+
+.ap-roteiro { display: grid; gap: calc(var(--u) * 0.85); margin: 0; padding: 0; list-style: none; }
+.ap-roteiro li {
+  display: flex;
+  gap: calc(var(--u) * 1);
+  align-items: center;
+  font-size: calc(var(--u) * 1.25);
+  line-height: 1.35;
+  color: #c9c2bb;
+}
+.slide-escuro .ap-roteiro .ap-bolha { background: #2a2622; color: #9b928a; }
+.ap-roteiro .ap-roteiro-destaque { color: #fff; font-weight: 600; }
+.slide-escuro .ap-roteiro .ap-roteiro-destaque .ap-bolha { background: var(--accent); color: #fff; }
+
+/* =====================================================================
+   Telas de computador: o layout em colunas do slide
+   ===================================================================== */
+@media (min-width: 1024px) {
+  .ap-colunas,
+  .ap-grade-2 { grid-template-columns: repeat(2, 1fr); }
+  .ap-colunas-3-2 { grid-template-columns: 3fr 2fr; }
+  .ap-grade-3 { grid-template-columns: repeat(3, 1fr); }
+  .ap-modelo { grid-template-columns: 1fr 1.15fr 1fr; }
+  .ap-numeros { grid-template-columns: repeat(3, 1fr); }
+  .ap-passos { grid-template-columns: repeat(5, 1fr); }
+  .ap-etapas { grid-template-columns: repeat(4, 1fr); }
+  .ap-ia { grid-template-columns: auto 1fr; }
+
+  .ap-fluxo { grid-template-columns: repeat(5, 1fr); }
+  .ap-fluxo-item + .ap-fluxo-item::before {
+    top: 50%;
+    left: calc(var(--u) * -2);
+    transform: translateY(-50%);
+  }
+}
+
+/* =====================================================================
+   Celular e tablet: uma coluna, e a unidade para de encolher com a tela
+   ===================================================================== */
+@media (max-width: 1023px) {
+  .slides { --u: 13px; }
+  .slide { padding: 40px 20px 56px; }
+  .ap-titulo { font-size: 30px; }
+  .ap-marca { font-size: 64px; }
+  .ap-tabela th { white-space: normal; }
+  .ap-codigo { font-size: 12px; }
+  .ap-pagina { right: 20px; bottom: 16px; }
+}
+
+/* =====================================================================
+   Impressão — é daqui que sai o PDF
+
+   Uma página por slide, 338 × 190 mm (16:9). --u fica fixo em pt, e os
+   textos principais também, explicitamente: nada aqui depende do tamanho
+   da janela.
+   ===================================================================== */
+@media print {
+  @page { size: 338mm 190mm; margin: 0; }
+
+  html { scroll-snap-type: none; }
+  body.apresentacao { background: var(--bg); }
+  .ap-baixar { display: none !important; }
+
+  .slides { --u: 11pt; }
+
+  .slide {
+    min-height: 0;
+    height: 190mm;
+    max-height: 190mm;
+    overflow: hidden;
+    padding: 12mm 18mm;
+    border-bottom: none;
+    break-after: page;
+    page-break-after: always;
+    break-inside: avoid;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .slide:last-child { break-after: auto; page-break-after: auto; }
+
+  .ap-titulo { font-size: 32pt; }
+  .ap-sub { font-size: 12.5pt; }
+  .ap-rotulo { font-size: 8.5pt; }
+  .ap-texto { font-size: 12.5pt; }
+  .ap-nota { font-size: 11pt; }
+  .ap-cartao-titulo { font-size: 12pt; }
+  .ap-cartao-texto { font-size: 10.4pt; }
+  .ap-tabela th,
+  .ap-tabela td { font-size: 11pt; }
+  .ap-codigo { font-size: 9.2pt; overflow: hidden; }
+  .ap-marca { font-size: 76pt; }
+  .ap-lema { font-size: 32pt; }
+  .ap-pagina { right: 18mm; bottom: 6mm; font-size: 8.5pt; }
+
+  .ap-colunas,
+  .ap-grade-2 { grid-template-columns: repeat(2, 1fr); }
+  .ap-colunas-3-2 { grid-template-columns: 3fr 2fr; }
+  .ap-grade-3 { grid-template-columns: repeat(3, 1fr); }
+  .ap-modelo { grid-template-columns: 1fr 1.15fr 1fr; }
+  .ap-numeros { grid-template-columns: repeat(3, 1fr); }
+  .ap-passos { grid-template-columns: repeat(5, 1fr); }
+  .ap-etapas { grid-template-columns: repeat(4, 1fr); }
+  .ap-ia { grid-template-columns: auto 1fr; }
+  .ap-fluxo { grid-template-columns: repeat(5, 1fr); }
+  .ap-fluxo-item + .ap-fluxo-item::before {
+    top: 50%;
+    left: calc(var(--u) * -2);
+    transform: translateY(-50%);
+  }
+}

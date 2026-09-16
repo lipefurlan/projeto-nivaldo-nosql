@@ -27,3 +27,7 @@ desktop.ini
 
 # arquivos de bloqueio do Office
 ~$*
+
+# Node — só para gerar a apresentação (docs/apresentacao)
+node_modules/
+package-lock.json

@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Apresentação — Torra &amp; Terra</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='apresentacao.css') }}">
+</head>
+<body class="apresentacao">
+{#
+  Apresentação do projeto NoSQL. HTML e CSS puros: a loja usa
+  script-src 'none', então nada de JavaScript — a navegação é o próprio
+  scroll. Também não há style="..." em lugar nenhum: a mesma política
+  bloqueia estilo inline. O texto vem de templates/apresentacao.json, o
+  mesmo arquivo que gera o PowerPoint.
+#}
+<main class="slides">
+
+  {# ---------- 1 · CAPA ---------- #}
+  {% set s = slides.capa %}
+  <section class="slide slide-escuro" aria-label="Slide 1: capa">
+    <div class="slide-interno">
+      <p class="ap-rotulo">{{ s.rotulo }}</p>
+      <h1 class="ap-marca">Torra <span>&amp;</span> Terra</h1>
+      <p class="ap-lema">{{ s.lema }}</p>
+      <p class="ap-texto ap-capa-texto">{{ s.texto }}</p>
+      <p class="ap-assinatura">{{ s.professor }} · {{ s.grupo|rico }}</p>
+      <div class="ap-baixar">
+        <a class="botao botao-primario" href="{{ url_for('static', filename=deck.arquivo ~ '.pptx') }}" download>Baixar em PowerPoint</a>
+        <a class="botao botao-secundario" href="{{ url_for('static', filename=deck.arquivo ~ '.pdf') }}" download>Baixar em PDF</a>
+        <a class="botao botao-secundario" href="{{ url_for('catalogo') }}">Ir para a loja</a>
+      </div>
+    </div>
+    <p class="ap-pagina">1 / {{ total }}</p>
+  </section>
+
+  {# ---------- 2 · COMO TRABALHAMOS ---------- #}
+  {% set s = slides.etapas %}
+  <section class="slide" aria-label="Slide 2: {{ s.titulo }}">
+    <div class="slide-interno">
+      <h2 class="ap-titulo">{{ s.titulo }}</h2>
+      <p class="ap-sub">{{ s.sub }}</p>
+      <ol class="ap-etapas">
+        {% for n, titulo, detalhe in s.etapas %}
+        <li class="ap-cartao{% if n == s.destaque %} ap-cartao-destaque{% endif %}">
+          <span class="ap-bolha">{{ n }}</span>
+          <strong class="ap-cartao-titulo">{{ titulo }}</strong>
+          <span class="ap-cartao-texto">{{ detalhe }}</span>
+        </li>
+        {% endfor %}
+        <li class="ap-etapas-nota">{{ s.nota }}</li>
+      </ol>
+    </div>
+    <p class="ap-pagina">2 / {{ total }}</p>
+  </section>
+
+  {# ---------- 3 · POR QUE NOSQL ---------- #}
+  {% set s = slides.por_que_nosql %}
+  <section class="slide" aria-label="Slide 3: {{ s.titulo }}">
+    <div class="slide-interno">
+      <h2 class="ap-titulo">{{ s.titulo }}</h2>
+      <p class="ap-sub">{{ s.sub }}</p>
+      <div class="ap-colunas ap-colunas-3-2">
+        <div class="ap-pilha">
+          {% for titulo, texto in s.cartoes %}
+          <div class="ap-cartao">
+            <strong class="ap-cartao-titulo">{{ titulo }}</strong>
+            <p class="ap-cartao-texto">{{ texto }}</p>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="ap-cartao ap-cartao-destaque">
+          <p class="ap-rotulo ap-rotulo-destaque">{{ s.consultas_titulo }}</p>
+          <table class="ap-tabela ap-tabela-consultas">
+            {% for pergunta, indice in s.consultas %}
+            <tr>
+              <td>{{ pergunta }}</td>
+              <td><code>{{ indice }}</code></td>
+            </tr>
+            {% endfor %}
+          </table>
+        </div>
+      </div>
+      <p class="ap-nota">{{ s.nota }}</p>
+    </div>
+    <p class="ap-pagina">3 / {{ total }}</p>
+  </section>
+
+  {# ---------- 4 · ARQUITETURA ---------- #}
+  {% set s = slides.arquitetura %}
+  <section class="slide" aria-label="Slide 4: {{ s.titulo }}">
+    <div class="slide-interno">
+      <h2 class="ap-titulo">{{ s.titulo }}</h2>
+      <p class="ap-sub">{{ s.sub }}</p>
+      <ol class="ap-fluxo">
+        {% for peca, papel, forte in s.fluxo %}
+        <li class="ap-fluxo-item{% if forte %} ap-fluxo-item-forte{% endif %}">
+          <strong>{{ peca }}</strong><span>{{ papel }}</span>
+        </li>
+        {% endfor %}
+      </ol>
+      <p class="ap-volta">{{ s.volta }}</p>
+      <p class="ap-rotulo ap-rotulo-destaque">{{ s.pecas_titulo }}</p>
+      <table class="ap-tabela ap-tabela-pecas">
+        {% for peca, lingua, frase in s.pecas %}
+        <tr>
+          <th scope="row">{{ peca }}</th>
+          <td class="ap-lingua">{{ lingua }}</td>
+          <td>{{ frase|rico }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      <p class="ap-nota">{{ s.nota }}</p>
+    </div>
+    <p class="ap-pagina">4 / {{ total }}</p>
+  </section>
+
+  {# ---------- 5 · FERRAMENTAS ---------- #}
+  {% set s = slides.ferramentas %}
+  <section class="slide" aria-label="Slide 5: {{ s.titulo }}">
+    <div class="slide-interno">
+      <h2 class="ap-titulo">{{ s.titulo }}</h2>
+      <p class="ap-sub">{{ s.sub }}</p>
+      <div class="ap-grade-3">
+        {% for grupo, lista in s.grupos %}
+        <div class="ap-cartao">
+          <p class="ap-rotulo {{ ['ap-rotulo-destaque', '', 'ap-rotulo-ok'][loop.index0] }}">{{ grupo }}</p>
+          <dl class="ap-ferramentas">
+            {% for ferramenta, para_que in lista %}
+            <dt>{{ ferramenta }}</dt>
+            <dd>{{ para_que }}</dd>
+            {% endfor %}
+          </dl>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="ap-cartao ap-cartao-destaque ap-ia">
+        <p class="ap-ia-nome">{{ s.ia.nome }}<span>{{ s.ia.detalhe }}</span></p>
+        <p class="ap-cartao-texto ap-texto-forte">{{ s.ia.analogia|rico }} {{ s.ia.texto }}</p>
+      </div>
+      <p class="ap-nota">{{ s.nota }}</p>
+    </div>
+    <p class="ap-pagina">5 / {{ total }}</p>
+  </section>
+
+  {# ---------- 6 · MODELAGEM ---------- #}
+  {% set s = slides.modelagem %}
+  <section class="slide" aria-label="Slide 6: {{ s.titulo }}">
+    <div class="slide-interno">
+      <h2 class="ap-titulo">{{ s.titulo }}</h2>
+      <p class="ap-sub">{{ s.sub }}</p>
+      <div class="ap-modelo">
+        <div class="ap-pilha">
+          {% for nome, linhas in s.fichas[:2] %}
+          <figure class="ap-ficha">
+            <figcaption class="ap-rotulo">ficha · {{ nome }}</figcaption>
+            <pre class="ap-codigo">{{ linhas|map('codigo')|join('\n') }}</pre>
+          </figure>
+          {% endfor %}
+        </div>
+        {% set nome, linhas = s.fichas[2] %}
+        <figure class="ap-ficha">
+          <figcaption class="ap-rotulo ap-rotulo-destaque">ficha · {{ nome }}</figcaption>
+          <pre class="ap-codigo">{{ linhas|map('codigo')|join('\n') }}</pre>
+          <p class="ap-moagem">{{ s.moagem }}</p>
+        </figure>
+        <div class="ap-pilha">
+          {% for rotulo, resumo, frase in s.decisoes %}
+          <div class="ap-cartao">
+            <p class="ap-rotulo ap-rotulo-destaque">{{ rotulo }}</p>
+            <strong class="ap-cartao-titulo">{{ resumo }}</strong>
+            <p class="ap-cartao-texto">{{ frase }}</p>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      <p class="ap-nota">{{ s.apoio }}</p>
+    </div>
+    <p class="ap-pagina">6 / {{ total }}</p>
+  </section>
+
+  {# ---------- 7 · COMPARAÇÃO ---------- #}
+  {% set s = slides.comparacao %}
+  <section class="slide" aria-label="Slide 7: {{ s.titulo }}">
+    <div class="slide-interno">
+      <h2 class="ap-titulo">{{ s.titulo }}</h2>
+      <p class="ap-sub">{{ s.sub }}</p>
+      <div class="ap-colunas">
+        {% for rotulo, frase in s.analogias %}
+        <div class="ap-cartao{% if loop.last %} ap-cartao-destaque{% endif %}">
+          <p class="ap-rotulo{% if loop.last %} ap-rotulo-destaque{% endif %}">{{ rotulo }}</p>
+          <p class="ap-frase">{{ frase }}</p>
+        </div>
+        {% endfor %}
+      </div>
+      <table class="ap-tabela ap-tabela-comparacao">
+        <thead>
+          <tr><th scope="col"></th><th scope="col">PostgreSQL</th><th scope="col">CouchDB</th></tr>
+        </thead>
+        <tbody>
+          {% for tema, postgres, couch in s.linhas %}
+          <tr{% if loop.last %} class="ap-linha-forte"{% endif %}>
+            <th scope="row">{{ tema }}</th>
+            <td>{{ postgres }}</td>
+            <td>{{ couch }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="ap-pagina">7 / {{ total }}</p>
+  </section>
+
+  {# ---------- 8 · CHECKOUT ---------- #}
+  {% set s = slides.checkout %}
+  <section class="slide" aria-label="Slide 8: {{ s.titulo }}">
+    <div class="slide-interno">
+      <h2 class="ap-titulo">{{ s.titulo }}</h2>
+      <p class="ap-sub">{{ s.sub }}</p>
+      <div class="ap-colunas">
+        <div class="ap-cartao ap-cartao-erro">
+          <p class="ap-rotulo ap-rotulo-erro">{{ s.risco[0] }}</p>
+          <p class="ap-cartao-texto ap-texto-forte">{{ s.risco[1] }}</p>
+        </div>
+        <div class="ap-cartao">
+          <p class="ap-rotulo">{{ s.base[0] }}</p>
+          <p class="ap-cartao-texto">{{ s.base[1] }}</p>
+        </div>
+      </div>
+      <ol class="ap-passos">
+        {% for n, titulo, detalhe in s.passos %}
+        <li class="ap-passo">
+          <span class="ap-bolha">{{ n }}</span>
+          <strong class="ap-cartao-titulo">{{ titulo }}</strong>
+          <span class="ap-cartao-texto">{{ detalhe }}</span>
+        </li>
+        {% endfor %}
+      </ol>
+      <div class="ap-colunas">
+        <div class="ap-cartao ap-cartao-erro">
+          <p class="ap-rotulo ap-rotulo-erro">{{ s.estorno[0] }}</p>
+          <p class="ap-cartao-texto ap-texto-forte">{{ s.estorno[1] }}</p>
+        </div>
+        <div class="ap-cartao ap-cartao-ok">
+          <p class="ap-rotulo ap-rotulo-ok">{{ s.retry[0] }}</p>
+          <p class="ap-cartao-texto ap-texto-forte">{{ s.retry[1] }}</p>
+        </div>
+      </div>
+      <p class="ap-nota">{{ s.rodape }}</p>
+    </div>
+    <p class="ap-pagina">8 / {{ total }}</p>
+  </section>
+
+  {# ---------- 9 · TESTE DE CONFLITO ---------- #}
+  {% set s = slides.conflito %}
+  <section class="slide" aria-label="Slide 9: {{ s.titulo }}">
+    <div class="slide-interno">
+      <h2 class="ap-titulo">{{ s.titulo }}</h2>
+      <p class="ap-sub">{{ s.sub }}</p>
+      <div class="ap-colunas ap-colunas-3-2">
+        <ol class="ap-linha-do-tempo">
+          {% for titulo, detalhe in s.passos %}
+          <li>
+            <span class="ap-bolha{% if loop.index == 3 %} ap-bolha-erro{% elif loop.index == 5 %} ap-bolha-ok{% endif %}">{{ loop.index }}</span>
+            <p><strong>{{ titulo }}</strong> — {{ detalhe }}</p>
+          </li>
+          {% endfor %}
+        </ol>
+        <div class="ap-pilha">
+          {% for rotulo, texto, teste in s.resultados %}
+          <div class="ap-cartao ap-cartao-ok">
+            <p class="ap-rotulo ap-rotulo-ok">{{ rotulo }}</p>
+            <p class="ap-cartao-texto ap-texto-forte">{{ texto }}</p>
+            <code class="ap-teste">{{ teste }}</code>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    <p class="ap-pagina">9 / {{ total }}</p>
+  </section>
+
+  {# ---------- 10 · PROBLEMAS ---------- #}
+  {% set s = slides.problemas %}
+  <section class="slide" aria-label="Slide 10: {{ s.titulo }}">
+    <div class="slide-interno">
+      <h2 class="ap-titulo">{{ s.titulo }}</h2>
+      <p class="ap-sub">{{ s.sub }}</p>
+      <div class="ap-grade-2">
+        {% for titulo, problema, solucao in s.problemas %}
+        <div class="ap-cartao ap-problema">
+          <span class="ap-bolha ap-bolha-erro">{{ loop.index }}</span>
+          <div>
+            <strong class="ap-cartao-titulo">{{ titulo }}</strong>
+            <p class="ap-cartao-texto">{{ problema }}</p>
+            <p class="ap-cartao-texto ap-solucao">{{ solucao }}</p>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      <p class="ap-nota">{{ s.rodape }}</p>
+    </div>
+    <p class="ap-pagina">10 / {{ total }}</p>
+  </section>
+
+  {# ---------- 11 · NÚMEROS ---------- #}
+  {% set s = slides.numeros %}
+  <section class="slide" aria-label="Slide 11: {{ s.titulo }}">
+    <div class="slide-interno">
+      <h2 class="ap-titulo">{{ s.titulo }}</h2>
+      <div class="ap-colunas ap-colunas-3-2">
+        <div>
+          <div class="ap-numeros">
+            {% for valor, titulo, detalhe in s.numeros %}
+            <div class="ap-cartao">
+              <span class="ap-numero">{{ valor }}</span>
+              <strong class="ap-cartao-titulo">{{ titulo }}</strong>
+              <span class="ap-cartao-texto">{{ detalhe }}</span>
+            </div>
+            {% endfor %}
+          </div>
+          <p class="ap-nota">{{ s.latencia|rico }}</p>
+        </div>
+        <div class="ap-cartao ap-cartao-destaque">
+          <p class="ap-rotulo ap-rotulo-destaque">{{ s.fora_titulo }}</p>
+          <ul class="ap-lista">
+            {% for item in s.fora %}
+            <li>{{ item }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+    </div>
+    <p class="ap-pagina">11 / {{ total }}</p>
+  </section>
+
+  {# ---------- 12 · DEMONSTRAÇÃO ---------- #}
+  {% set s = slides.demonstracao %}
+  <section class="slide slide-escuro" aria-label="Slide 12: {{ s.titulo }}">
+    <div class="slide-interno">
+      <h2 class="ap-titulo">{{ s.titulo }}</h2>
+      <p class="ap-url">{{ s.url|rico }}</p>
+      <div class="ap-colunas ap-colunas-3-2">
+        <div>
+          <ol class="ap-roteiro">
+            {% for passo in s.passos %}
+            <li{% if loop.index == s.destaque %} class="ap-roteiro-destaque"{% endif %}>
+              <span class="ap-bolha">{{ loop.index }}</span>
+              <span>{{ passo }}</span>
+            </li>
+            {% endfor %}
+          </ol>
+          <p class="ap-nota">{{ s.nota }}</p>
+        </div>
+        {# Cartão branco de propósito: o QR precisa de fundo claro em volta
+           para a câmera do celular conseguir ler. #}
+        <div class="ap-cartao ap-whatsapp">
+          <img src="{{ url_for('static', filename=s.whatsapp.imagem) }}"
+               alt="QR code que abre o WhatsApp do Torra &amp; Terra"
+               width="220" height="220">
+          <strong class="ap-cartao-titulo">{{ s.whatsapp.titulo }}</strong>
+          <p class="ap-cartao-texto">{{ s.whatsapp.texto }}</p>
+          <a class="ap-whatsapp-numero" href="{{ s.whatsapp.link }}" rel="noopener">{{ s.whatsapp.numero }}</a>
+        </div>
+      </div>
+      <div class="ap-baixar">
+        <a class="botao botao-primario" href="{{ url_for('catalogo') }}">Abrir a loja</a>
+      </div>
+    </div>
+    <p class="ap-pagina">12 / {{ total }}</p>
+  </section>
+
+</main>
+</body>
+</html>

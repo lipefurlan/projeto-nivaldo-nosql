@@ -1,5 +1,7 @@
 """A loja pelo navegador: telas, sessão e a compra de ponta a ponta."""
 
+from pathlib import Path
+
 import pytest
 
 from apoio import extrair_token, pedido_de_teste, produto_de_teste
@@ -264,6 +266,27 @@ def test_meus_pedidos_nao_mostra_pedido_de_outro_cliente(navegador, banco, clien
     outro.post("/cadastro", data={"nome": "Caio", "email": "caio@exemplo.com", "senha": "senha-do-caio-123", "_csrf": token})
 
     assert "Você ainda não fez nenhum pedido." in outro.get("/meus-pedidos").get_data(as_text=True)
+
+
+# ---------------------------------------------------------------------
+# Apresentação do trabalho
+# ---------------------------------------------------------------------
+
+def test_apresentacao_tem_12_slides_sem_script_e_oferece_os_arquivos(navegador):
+    resposta = navegador.get("/apresentacao")
+    html = resposta.get_data(as_text=True)
+
+    assert resposta.status_code == 200
+    assert html.count('<section class="slide') == 12
+    # A loja usa script-src 'none' e style-src sem 'unsafe-inline': script ou
+    # estilo inline aqui seriam bloqueados pelo próprio navegador.
+    assert "<script" not in html
+    assert 'style="' not in html
+
+    publico = Path(__file__).resolve().parent.parent / "public" / "static"
+    for arquivo in ("Torra_e_Terra_NoSQL.pptx", "Torra_e_Terra_NoSQL.pdf"):
+        assert arquivo in html
+        assert (publico / arquivo).is_file(), f"{arquivo} não foi gerado"
 
 
 # ---------------------------------------------------------------------
