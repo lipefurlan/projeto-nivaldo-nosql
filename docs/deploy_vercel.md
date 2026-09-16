@@ -10,7 +10,7 @@ navegador ──HTTPS──> Vercel (função Python, Washington D.C.)
                           └──HTTPS──> IBM Cloudant (Washington DC)
 ```
 
-A região é a mesma de propósito: cada página faz de uma a seis idas ao banco,
+A região é a mesma de propósito: cada página faz de uma a oito idas ao banco,
 e cada ida atravessando um oceano somaria centenas de milissegundos.
 
 ---
@@ -26,8 +26,11 @@ A conta da IBM Cloud **pede cartão de crédito** na criação, só para
 verificação: a IBM faz uma retenção de cerca de US$ 1 e não cobra os planos
 Lite.
 
-Passar do limite de vazão do Cloudant não derruba a loja: ele responde
-HTTP 429 antes de processar, e o `banco.py` espera e tenta de novo.
+Passar do limite de vazão do Cloudant não derruba a loja de primeira: ele
+responde HTTP 429 antes de processar, e o `banco.py` espera e tenta de novo,
+até 4 vezes. Se o limite continuar estourado, a página "Voltamos em
+instantes" aparece. A cota mais apertada é a de consultas globais (5/s), onde
+a IBM conta `_all_docs` e `_find`.
 
 ---
 

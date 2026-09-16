@@ -40,7 +40,7 @@ Regras obrigatórias (na `validate_doc_update` e na aplicação):
 - `status` em `PENDENTE`, `CRIADO`, `PAGO`, `ENVIADO`, `CANCELADO`  
 - `quantidade > 0`; `total_centavos` igual à soma dos itens; mesmo café na mesma moagem é uma linha só  
 - Cliente nunca grava `senha`, só `senha_hash`; e-mail em minúsculas  
-- Pedido gravado não muda os itens; pedido `CANCELADO` não volta a valer
+- Pedido exige `criado_em`; gravado, não muda os itens (nem nome nem preço); `CANCELADO` não volta a valer; quem saiu de `PENDENTE` não volta
 
 Índices Mango — só estes, cada um justificado pela consulta em `couchdb/indices.json`: `idx_produtos_catalogo`, `idx_produtos_categoria`, `idx_clientes_email`, `idx_pedidos_cliente`. Categorias saem do índice primário (`_all_docs` com faixa `categoria:`). A consulta de pedidos `PENDENTE` da reconciliação roda sem índice de propósito. O teste `test_indices_atendem_as_consultas` confere tudo via `_explain`.
 
@@ -107,22 +107,22 @@ Minimalismo quente e editorial. Muito espaço em branco, blocos modulares, hiera
 
 ├── couchdb/{validacao.js, indices.json, seed.json}
 
-├── templates/{base,catalogo,produto,cadastro,login,carrinho,checkout,meus_pedidos,indisponivel}.html
+├── templates/{base,catalogo,produto,cadastro,login,carrinho,checkout,meus_pedidos,indisponivel,apresentacao}.html · templates/apresentacao.json
 
-├── public/static/style.css
+├── public/static/{style.css, apresentacao.css, Torra_e_Terra_NoSQL.pptx, Torra_e_Terra_NoSQL.pdf, whatsapp_qr.svg}
 
 ├── tests/{conftest,apoio,couchdb_falso,test_checkout,test_validacao,test_banco,test_rotas,test_seguranca}.py
 
 ├── .github/workflows/testes.yml
 
-└── docs/{requisitos,modelo_documental,consultas_e_indices,checkout_saga,comparacao_relacional_nosql,decisoes,deploy_vercel,plano_nosql}.md
+└── docs/{requisitos,modelo_documental,consultas_e_indices,checkout_saga,comparacao_relacional_nosql,decisoes,deploy_vercel,plano_nosql}.md · docs/apresentacao/ (gerador do .pptx)
 
 ## Ambiente
 
 - **Local:** `docker compose up -d` (CouchDB 3.5, Fauxton em `http://127.0.0.1:5984/_utils/`) ou o próprio Cloudant pelo `.env`. Esta máquina **não tem Docker**.  
 - **Produção:** Vercel (Flask detectado pelo `app.py`, região `iad1`) + IBM Cloudant Lite (Washington DC). `VERCEL=1` liga o modo produção; sem `SECRET_KEY` ou `COUCHDB_URL` a loja não sobe.  
 - O `.env` é carregado com caminho explícito: esta pasta mora dentro do projeto relacional, que tem outro `.env`.  
-- Cloudant Lite: 10 escritas/s e 5 consultas globais/s — o `banco.py` repete no 429. Prefira lookup por `_id` e `_all_docs` a `_find` quando der.
+- Cloudant Lite: 20 leituras/s, 10 escritas/s e 5 consultas globais/s — o `banco.py` repete no 429. Pela documentação da IBM, `_all_docs` e `_find` globais contam como **consulta global**, a cota mais apertada; leitura por `_id` e `_bulk_get` contam como leitura. Prefira ler pelo `_id` quando der.
 
 Comandos: `flask --app app init-db` · `seed-db` · `reset-db` · `reconciliar`
 

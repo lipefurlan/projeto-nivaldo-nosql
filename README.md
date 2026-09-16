@@ -164,11 +164,14 @@ O que está coberto:
 | Café acaba no meio da saga | **Compensação:** pedido `CANCELADO`, estoque reservado volta |
 | Timeout depois de gravar | As marcas de reserva dizem o que desfazer |
 | Confirmação gravada sem resposta | A compra vale, nada é desfeito |
-| Clique duplo em "Confirmar" | O `_id` do pedido barra a segunda compra |
+| Timeout ao registrar o pedido | O que entrou é cancelado na hora; nada fica "processando" sem reserva |
+| Conflito que não para | Depois de 6 rodadas a saga desiste e estorna o que reservou |
+| Compensação sem banco | O pedido fica pendente e `flask reconciliar` termina depois |
+| Clique duplo em "Confirmar" | O `_id` do pedido barra a segunda compra, e um reenvio com o primeiro ainda em andamento não é dado como compra feita |
 | Saga interrompida | `flask reconciliar` termina o serviço, sem devolver em dobro |
 | Regras no banco | Preço negativo, SCA fora de 80–100, moagem inválida, senha em texto puro: o CouchDB responde 403 |
 | Pedido gravado | Itens e preço congelado não podem mais mudar — regra do banco |
-| E-mail único | Vale até com dois cadastros ao mesmo tempo |
+| E-mail único | Vale até com dois cadastros ao mesmo tempo, e quando a resposta do cadastro se perde |
 | Índices | O `_explain` do CouchDB confirma o índice de cada consulta |
 | Segurança | CSRF, cabeçalhos, cookie de sessão, redirecionamento pós-login |
 
@@ -230,13 +233,32 @@ O que está coberto:
 
 ---
 
+## Apresentação
+
+A apresentação do trabalho está na própria loja, em `/apresentacao` — HTML e
+CSS, sem JavaScript, um slide por tela. Os mesmos 12 slides saem em
+[PowerPoint](public/static/Torra_e_Terra_NoSQL.pptx), com notas do
+apresentador, e em [PDF](public/static/Torra_e_Terra_NoSQL.pdf). O texto de
+todos os formatos mora num arquivo só, `templates/apresentacao.json`; como
+gerar de novo está em [`docs/apresentacao/README.md`](docs/apresentacao/README.md).
+
+---
+
 ## Limitações conhecidas
 
 Sem pagamento, frete ou área administrativa. O carrinho vive na sessão. A
 reconciliação é um comando manual — em produção ela seria agendada. O plano
-gratuito do Cloudant limita a vazão (10 escritas e 5 consultas por segundo);
-o `banco.py` espera e repete quando recebe 429. Detalhes em
-[`docs/requisitos.md`](docs/requisitos.md).
+gratuito do Cloudant limita a vazão (20 leituras, 10 escritas e 5 consultas
+globais por segundo); o `banco.py` espera e repete quando recebe 429.
+
+Duas limitações de cluster, documentadas em
+[`docs/checkout_saga.md`](docs/checkout_saga.md) e
+[`docs/modelo_documental.md`](docs/modelo_documental.md): no Cloudant, duas
+gravações quase simultâneas no mesmo documento podem terminar como revisões em
+conflito (HTTP 202) em vez de um 409, e a loja não lê `_conflicts`; e o
+documento `email:<endereço>` põe o e-mail no `_id`, que aparece em logs e
+fica no túmulo de exclusão — trocar por um hash do e-mail é o próximo passo.
+Mais em [`docs/requisitos.md`](docs/requisitos.md).
 
 ---
 
