@@ -1,353 +1,366 @@
 """
-Torra & Terra — e-commerce de cafe especial.
+Torra & Terra — e-commerce de café especial, versão NoSQL.
 
-FACAMP · Tratamento e Armazenamento da Informacao
+FACAMP · Tratamento e Armazenamento da Informação
 Professor: Nivaldo T. Marcusso
 
-Configuracao, modelos ORM, rotas e comandos de linha de comando.
+É a mesma loja do projeto relacional (tag v1-relacional no Git), agora sobre
+o Apache CouchDB — ou o IBM Cloudant, que fala a mesma API. O que mudou de
+lugar na troca:
 
-Sobre os modelos abaixo: eles ESPELHAM o SQL/schema.sql, que e a fonte da
-verdade da estrutura do banco. `db.create_all()` nunca e chamado neste
-projeto — as tabelas nascem do DDL escrito a mao, porque e la que as
-constraints ficam visiveis e auditaveis.
+    tabelas + FOREIGN KEY     ->  documentos JSON com `tipo`, embed ou referência
+    CHECK / NOT NULL          ->  validate_doc_update (couchdb/validacao.js)
+    UNIQUE (email)            ->  o _id de um documento-chave "email:<endereço>"
+    SELECT ... FOR UPDATE     ->  controle otimista por _rev, nova tentativa no 409
+    COMMIT / ROLLBACK         ->  saga: reserva, confirmação e compensação
+
+Este arquivo tem a configuração, as regras de negócio, as rotas e os
+comandos de linha de comando. A conversa HTTP com o banco fica em banco.py.
 """
 
+import json
+import logging
 import os
 import secrets
+import time
+import uuid
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from functools import wraps
 from pathlib import Path
 
+import click
 from dotenv import load_dotenv
 from flask import (
     Flask,
     abort,
+    current_app,
     flash,
+    jsonify,
     redirect,
     render_template,
     request,
     session,
     url_for,
 )
-from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import CheckConstraint, UniqueConstraint, func
-from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
-load_dotenv()
+from banco import BancoIndisponivel, Conflito, CouchDB, ErroBanco, NaoEncontrado
 
 RAIZ = Path(__file__).resolve().parent
+PASTA_COUCHDB = RAIZ / "couchdb"
+
+# Caminho explícito: sem ele, o python-dotenv sobe pelas pastas-pai até achar
+# um .env — e esta pasta mora dentro do projeto relacional, que tem o seu.
+load_dotenv(RAIZ / ".env")
+
+# Vai em todo documento gravado. Se o formato de um documento mudar no
+# futuro, o código sabe distinguir o novo do antigo sem migrar tudo de uma vez.
+VERSAO_ESQUEMA = 1
+
+log = logging.getLogger("torra_terra")
 
 
-# ---------------------------------------------------------------------
-# Conexao
-# ---------------------------------------------------------------------
-def normalizar_url(url: str) -> str:
-    """Ajusta a string de conexao para o driver psycopg 3.
+# =====================================================================
+# Configuração
+# =====================================================================
 
-    Provedores de cloud (Railway, Render, Neon, Heroku) entregam a
-    DATABASE_URL como `postgresql://...`, e alguns ainda usam o formato
-    legado `postgres://`. O SQLAlchemy precisa do dialeto explicito
-    `postgresql+psycopg://` para escolher o psycopg 3 em vez do psycopg2.
-
-    Sem esta normalizacao o deploy sobe e quebra na primeira query com
-    `Can't load plugin: sqlalchemy.dialects:postgres`.
-    """
-    if url.startswith("postgres://"):
-        url = url.replace("postgres://", "postgresql://", 1)
-    if url.startswith("postgresql://"):
-        url = url.replace("postgresql://", "postgresql+psycopg://", 1)
-    return url
+def em_producao() -> bool:
+    """O Vercel define VERCEL=1 em todo deploy, de produção e de preview."""
+    return os.getenv("VERCEL") == "1" or os.getenv("FLASK_ENV") == "production"
 
 
 def criar_app(config_teste: dict | None = None) -> Flask:
-    """Fabrica da aplicacao.
+    """Fábrica da aplicação.
 
-    Recebe `config_teste` para que o pytest monte a app apontando para um
-    banco separado, sem tocar no banco de desenvolvimento.
+    Recebe `config_teste` para o pytest apontar a loja para um banco
+    descartável, sem tocar no banco de desenvolvimento nem no de produção.
     """
-    app = Flask(__name__)
+    # Os estáticos moram em public/static porque é a pasta que o Vercel
+    # entrega direto do CDN, sem acordar a função Python. Localmente o Flask
+    # serve a mesma pasta no mesmo endereço /static.
+    app = Flask(__name__, static_folder="public/static", static_url_path="/static")
 
-    url = os.getenv(
-        "DATABASE_URL",
-        "postgresql://postgres:postgres@localhost:5432/torra_terra",
+    producao = em_producao()
+    app.config.update(
+        SECRET_KEY=os.getenv("SECRET_KEY"),
+        COUCHDB_URL=os.getenv("COUCHDB_URL"),
+        COUCHDB_DATABASE=os.getenv("COUCHDB_DATABASE", "torra_terra"),
+        COUCHDB_IAM_APIKEY=os.getenv("COUCHDB_IAM_APIKEY"),
+        COUCHDB_SESSAO=None,
+        # HttpOnly: JavaScript não lê o cookie, então um XSS não rouba a sessão.
+        SESSION_COOKIE_HTTPONLY=True,
+        # SameSite=Lax: o navegador não manda o cookie em POST vindo de outro
+        # site. É a primeira barreira contra CSRF, antes mesmo do token.
+        SESSION_COOKIE_SAMESITE="Lax",
+        # Secure só em produção: localmente o Flask roda em http e um cookie
+        # Secure não seria enviado, quebrando o login.
+        SESSION_COOKIE_SECURE=producao,
     )
-    app.config["SQLALCHEMY_DATABASE_URI"] = normalizar_url(url)
-    app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-
-    # Sem valor padrao em producao: sessao assinada com chave conhecida e
-    # sessao forjavel. O fallback so existe para desenvolvimento local.
-    app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-inseguro-trocar")
-
-    # --- Cookie de sessao ------------------------------------------------
-    # HttpOnly: JavaScript nao le o cookie, entao um XSS nao rouba a sessao.
-    app.config["SESSION_COOKIE_HTTPONLY"] = True
-
-    # SameSite=Lax: o navegador nao envia o cookie em POST vindo de outro
-    # site. E a primeira barreira contra CSRF, antes mesmo do token.
-    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-
-    # Secure so em producao: em desenvolvimento local o Flask roda em http
-    # e um cookie Secure simplesmente nao seria enviado, quebrando o login.
-    app.config["SESSION_COOKIE_SECURE"] = (
-        os.getenv("FLASK_ENV", "development") == "production"
-    )
-
     if config_teste:
         app.config.update(config_teste)
 
-    db.init_app(app)
+    # Em produção, faltar segredo é erro de deploy, não motivo para cair num
+    # valor padrão: sessão assinada com chave conhecida é sessão forjável.
+    if producao:
+        faltando = [nome for nome in ("SECRET_KEY", "COUCHDB_URL") if not app.config[nome]]
+        if faltando:
+            raise RuntimeError(
+                "Variáveis de ambiente obrigatórias ausentes: " + ", ".join(faltando)
+            )
+    app.config["SECRET_KEY"] = app.config["SECRET_KEY"] or "dev-inseguro-trocar"
+    app.config["COUCHDB_URL"] = app.config["COUCHDB_URL"] or "http://admin:admin@127.0.0.1:5984"
+
+    app.extensions["couchdb"] = CouchDB(
+        app.config["COUCHDB_URL"],
+        app.config["COUCHDB_DATABASE"],
+        apikey_iam=app.config["COUCHDB_IAM_APIKEY"],
+        sessao=app.config["COUCHDB_SESSAO"],
+    )
+
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+
     registrar_comandos(app)
     registrar_rotas(app)
     return app
 
 
-db = SQLAlchemy()
+def banco() -> CouchDB:
+    return current_app.extensions["couchdb"]
 
 
 # =====================================================================
-# Modelos — espelho do SQL/schema.sql
+# Regras dos documentos, do lado da aplicação
+#
+# São as mesmas da validate_doc_update (couchdb/validacao.js). Conferir aqui
+# antes de gravar dá mensagem clara e poupa uma ida ao banco; a função do
+# banco continua sendo a última palavra, para quem não passa pela loja.
 # =====================================================================
 
-class Categoria(db.Model):
-    """Regiao produtora. Separada de produtos para respeitar a 3FN."""
-
-    __tablename__ = "categorias"
-
-    id = db.Column(db.Integer, primary_key=True)
-    nome = db.Column(db.String(80), nullable=False, unique=True)
-    regiao = db.Column(db.String(80), nullable=False)
-    descricao = db.Column(db.Text)
-
-    produtos = db.relationship("Produto", back_populates="categoria")
-
-    def __repr__(self) -> str:
-        return f"<Categoria {self.nome}>"
+TORRAS = ("CLARA", "MEDIA", "ESCURA")
+MOAGENS = ("GRAO", "MEDIA", "FINA")
+STATUS_PEDIDO = ("PENDENTE", "CRIADO", "PAGO", "ENVIADO", "CANCELADO")
 
 
-class Cliente(db.Model):
-    __tablename__ = "clientes"
-
-    id = db.Column(db.Integer, primary_key=True)
-    nome = db.Column(db.String(120), nullable=False)
-    email = db.Column(db.String(160), nullable=False, unique=True)
-    senha_hash = db.Column(db.String(255), nullable=False)
-    criado_em = db.Column(db.DateTime, nullable=False, server_default=func.now())
-
-    pedidos = db.relationship("Pedido", back_populates="cliente")
-
-    def __repr__(self) -> str:
-        return f"<Cliente {self.email}>"
+class ErroValidacao(ValueError):
+    """Documento que o banco recusaria."""
 
 
-class Produto(db.Model):
-    __tablename__ = "produtos"
+def _inteiro(valor) -> bool:
+    # bool é subclasse de int em Python: sem a segunda checagem, True
+    # passaria como estoque 1.
+    return isinstance(valor, int) and not isinstance(valor, bool)
 
-    id = db.Column(db.Integer, primary_key=True)
-    nome = db.Column(db.String(140), nullable=False)
-    descricao = db.Column(db.Text)
 
-    # Numeric, nao Float: ponto flutuante binario nao representa 0,10 de
-    # forma exata e o erro se acumula na soma dos itens do pedido.
-    preco = db.Column(db.Numeric(10, 2), nullable=False)
+def _exigir(condicao: bool, mensagem: str) -> None:
+    if not condicao:
+        raise ErroValidacao(mensagem)
 
-    estoque = db.Column(db.Integer, nullable=False, default=0)
-    categoria_id = db.Column(
-        db.Integer, db.ForeignKey("categorias.id"), nullable=False
+
+def validar_produto(doc: dict) -> None:
+    _exigir(
+        doc.get("tipo") == "produto" and str(doc.get("_id", "")).startswith("produto:"),
+        "produto com _id ou tipo inválido",
     )
-    torra = db.Column(db.String(10), nullable=False)
-    nota_sensorial = db.Column(db.String(200))
-    pontuacao_sca = db.Column(db.Numeric(4, 2))
-    peso_g = db.Column(db.Integer, nullable=False, default=250)
-
-    categoria = db.relationship("Categoria", back_populates="produtos")
-
-    # Espelho das constraints do DDL. Estao aqui como documentacao viva do
-    # modelo — quem le o ORM ve as mesmas regras que o banco aplica.
-    __table_args__ = (
-        CheckConstraint("preco >= 0", name="ck_produtos_preco"),
-        CheckConstraint("estoque >= 0", name="ck_produtos_estoque"),
-        CheckConstraint(
-            "pontuacao_sca BETWEEN 80 AND 100", name="ck_produtos_sca"
-        ),
-        CheckConstraint(
-            "torra IN ('CLARA','MEDIA','ESCURA')", name="ck_produtos_torra"
-        ),
-        CheckConstraint("peso_g > 0", name="ck_produtos_peso"),
+    _exigir(bool(str(doc.get("nome") or "").strip()), "produto sem nome")
+    _exigir(
+        _inteiro(doc.get("preco_centavos")) and doc["preco_centavos"] >= 0,
+        "preco_centavos precisa ser inteiro e maior ou igual a zero",
+    )
+    _exigir(
+        _inteiro(doc.get("estoque")) and doc["estoque"] >= 0,
+        "estoque precisa ser inteiro e maior ou igual a zero",
+    )
+    _exigir(doc.get("torra") in TORRAS, "torra precisa ser CLARA, MEDIA ou ESCURA")
+    sca = doc.get("pontuacao_sca")
+    _exigir(
+        sca is None
+        or (isinstance(sca, (int, float)) and not isinstance(sca, bool) and 80 <= sca <= 100),
+        "pontuacao_sca precisa estar entre 80 e 100",
+    )
+    _exigir(
+        _inteiro(doc.get("peso_g")) and doc["peso_g"] > 0,
+        "peso_g precisa ser inteiro e maior que zero",
+    )
+    _exigir(isinstance(doc.get("ativo"), bool), "ativo precisa ser true ou false")
+    _exigir(
+        str(doc.get("categoria_id", "")).startswith("categoria:"),
+        "categoria_id precisa referenciar uma categoria",
     )
 
-    def __repr__(self) -> str:
-        return f"<Produto {self.nome}>"
 
-
-class Pedido(db.Model):
-    __tablename__ = "pedidos"
-
-    id = db.Column(db.Integer, primary_key=True)
-    cliente_id = db.Column(
-        db.Integer, db.ForeignKey("clientes.id"), nullable=False
+def validar_pedido(doc: dict) -> None:
+    _exigir(
+        doc.get("tipo") == "pedido" and str(doc.get("_id", "")).startswith("pedido:"),
+        "pedido com _id ou tipo inválido",
     )
-    status = db.Column(db.String(12), nullable=False, default="CRIADO")
-    total = db.Column(db.Numeric(10, 2), nullable=False, default=Decimal("0"))
-    criado_em = db.Column(db.DateTime, nullable=False, server_default=func.now())
+    _exigir(str(doc.get("cliente_id", "")).startswith("cliente:"), "pedido sem cliente")
+    _exigir(doc.get("status") in STATUS_PEDIDO, f"status inválido: {doc.get('status')}")
 
-    cliente = db.relationship("Cliente", back_populates="pedidos")
-    itens = db.relationship(
-        "ItemPedido", back_populates="pedido", cascade="all, delete-orphan"
-    )
+    itens = doc.get("itens")
+    _exigir(isinstance(itens, list) and len(itens) > 0, "pedido sem itens")
 
-    __table_args__ = (
-        CheckConstraint(
-            "status IN ('CRIADO','PAGO','ENVIADO','CANCELADO')",
-            name="ck_pedidos_status",
-        ),
-        CheckConstraint("total >= 0", name="ck_pedidos_total"),
-    )
+    vistos, soma = set(), 0
+    for item in itens:
+        _exigir(str(item.get("produto_id", "")).startswith("produto:"), "item sem produto")
+        _exigir(
+            _inteiro(item.get("quantidade")) and item["quantidade"] > 0,
+            "quantidade precisa ser inteira e maior que zero",
+        )
+        _exigir(item.get("moagem") in MOAGENS, "moagem precisa ser GRAO, MEDIA ou FINA")
+        _exigir(
+            _inteiro(item.get("preco_unitario_centavos")) and item["preco_unitario_centavos"] >= 0,
+            "preco_unitario_centavos precisa ser inteiro e maior ou igual a zero",
+        )
+        chave = (item["produto_id"], item["moagem"])
+        _exigir(chave not in vistos, f"item repetido: {item['produto_id']} em moagem {item['moagem']}")
+        vistos.add(chave)
+        soma += item["quantidade"] * item["preco_unitario_centavos"]
 
-    def __repr__(self) -> str:
-        return f"<Pedido {self.id} {self.status}>"
+    _exigir(doc.get("total_centavos") == soma, "total_centavos não bate com a soma dos itens")
 
 
-class ItemPedido(db.Model):
-    """Entidade de verdade, nao tabela de ligacao.
+# =====================================================================
+# Datas e formatação
+# =====================================================================
 
-    Carrega dois atributos que nao pertencem nem ao pedido nem ao produto:
-    a moagem escolhida na compra e o preco congelado da epoca.
+# O Brasil não tem horário de verão desde 2019: Brasília é UTC-3 o ano todo.
+# Um fuso fixo evita depender do pacote tzdata, que o Windows não traz.
+FUSO_BRASILIA = timezone(timedelta(hours=-3), "BRT")
+
+
+def agora_iso() -> str:
+    """Instante em UTC, ISO 8601 com milissegundos.
+
+    Todas as datas no mesmo fuso e no mesmo formato ordenam corretamente como
+    texto — é isso que permite o índice de pedidos ordenar por criado_em.
     """
-
-    __tablename__ = "itens_pedido"
-
-    id = db.Column(db.Integer, primary_key=True)
-    pedido_id = db.Column(
-        db.Integer,
-        db.ForeignKey("pedidos.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    produto_id = db.Column(
-        db.Integer, db.ForeignKey("produtos.id"), nullable=False
-    )
-    quantidade = db.Column(db.Integer, nullable=False)
-
-    # Congelado no momento da compra. Se o preco do cafe mudar amanha, o
-    # pedido antigo mantem o valor da epoca — senao o historico se
-    # reescreveria sozinho e o total deixaria de bater com a soma dos itens.
-    preco_unitario = db.Column(db.Numeric(10, 2), nullable=False)
-
-    # Mora aqui e nao em produtos porque o cliente escolhe na compra. E este
-    # atributo que faz de itens_pedido uma entidade.
-    moagem = db.Column(db.String(6), nullable=False)
-
-    pedido = db.relationship("Pedido", back_populates="itens")
-    produto = db.relationship("Produto")
-
-    __table_args__ = (
-        CheckConstraint("quantidade > 0", name="ck_itens_quantidade"),
-        CheckConstraint("preco_unitario >= 0", name="ck_itens_preco"),
-        CheckConstraint(
-            "moagem IN ('GRAO','MEDIA','FINA')", name="ck_itens_moagem"
-        ),
-        UniqueConstraint(
-            "pedido_id",
-            "produto_id",
-            "moagem",
-            name="uq_itens_pedido_produto_moagem",
-        ),
-    )
-
-    @property
-    def subtotal(self) -> Decimal:
-        return self.preco_unitario * self.quantidade
-
-    def __repr__(self) -> str:
-        return f"<ItemPedido pedido={self.pedido_id} produto={self.produto_id}>"
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
-# =====================================================================
-# Comandos de linha de comando
-# =====================================================================
+def formatar_brl(centavos) -> str:
+    """R$ 1.234,56 a partir de centavos inteiros.
 
-def _executar_script(nome: str) -> None:
-    """Roda um arquivo .sql inteiro no banco configurado.
-
-    Usa exec_driver_sql para entregar o script direto ao psycopg, que aceita
-    varias instrucoes numa chamada so. Passar por text() do SQLAlchemy
-    quebraria nos `$` e nos multiplos statements.
+    A troca dupla de separadores existe porque o Python formata no padrão
+    americano e não há locale pt-BR garantido no ambiente do deploy.
     """
-    caminho = RAIZ / "SQL" / nome
-    sql = caminho.read_text(encoding="utf-8")
-    with db.engine.begin() as conn:
-        conn.exec_driver_sql(sql)
+    reais = Decimal(int(centavos or 0)) / 100
+    texto = f"{reais:,.2f}"
+    return "R$ " + texto.replace(",", "_").replace(".", ",").replace("_", ".")
 
 
-def registrar_comandos(app: Flask) -> None:
-    @app.cli.command("init-db")
-    def init_db() -> None:
-        """Cria a estrutura do banco a partir do SQL/schema.sql."""
-        _executar_script("schema.sql")
-        print("Estrutura criada a partir de SQL/schema.sql")
+def slug(doc_id: str) -> str:
+    """'produto:chapada-geisha' -> 'chapada-geisha', o pedaço que vai na URL."""
+    return doc_id.split(":", 1)[1]
 
-    @app.cli.command("seed-db")
-    def seed_db() -> None:
-        """Carrega os 12 cafes do SQL/seed.sql."""
-        _executar_script("seed.sql")
-        total = db.session.scalar(db.select(func.count(Produto.id)))
-        print(f"Carga concluida: {total} cafes no catalogo")
 
-    @app.cli.command("reset-db")
-    def reset_db() -> None:
-        """Dropa, recria e recarrega. Apenas para desenvolvimento."""
-        _executar_script("schema.sql")
-        _executar_script("seed.sql")
-        total = db.session.scalar(db.select(func.count(Produto.id)))
-        print(f"Banco recriado do zero: {total} cafes no catalogo")
+def numero_pedido(pedido_id: str) -> str:
+    """Oito primeiros caracteres da chave do pedido, para exibir e falar ao telefone."""
+    return slug(pedido_id)[:8].upper()
+
+
+def data_brasilia(iso: str) -> str:
+    return datetime.fromisoformat(iso).astimezone(FUSO_BRASILIA).strftime("%d/%m/%Y às %H:%M")
+
+
+ROTULOS_STATUS = {
+    "PENDENTE": "processando",
+    "CRIADO": "criado",
+    "PAGO": "pago",
+    "ENVIADO": "enviado",
+    "CANCELADO": "cancelado",
+}
 
 
 # =====================================================================
-# Apresentacao
+# Catálogo de consultas
+#
+# Em NoSQL a consulta vem antes do modelo: primeiro se lista o que a loja
+# precisa perguntar, depois se desenha o documento e o índice que respondem.
+# Toda consulta Mango da loja está aqui, cada uma apontando o índice que a
+# atende (couchdb/indices.json). O teste test_indices_atendem_as_consultas
+# pergunta ao próprio CouchDB, via _explain, qual índice ele escolheu.
 # =====================================================================
 
-MOAGENS_VALIDAS = ("GRAO", "MEDIA", "FINA")
+CAMPOS_DO_CARTAO = [
+    "_id", "nome", "preco_centavos", "estoque", "torra",
+    "nota_sensorial", "pontuacao_sca", "peso_g", "categoria",
+]
 
-# Metodos que alteram estado. Sao os unicos que exigem token CSRF — um GET
-# nunca deveria mudar nada, e se mudasse o problema seria outro.
+
+def consulta_catalogo(categoria_id: str | None = None) -> dict:
+    # `fields` é o SELECT coluna1, coluna2 do Mango: o cartão do catálogo não
+    # precisa da descrição longa nem das marcas de reserva do checkout.
+    if categoria_id is None:
+        return {
+            "selector": {"tipo": "produto", "ativo": True},
+            "fields": CAMPOS_DO_CARTAO,
+            # O Mango só ordena por campos do índice, e na ordem do índice.
+            "sort": [{"tipo": "asc"}, {"ativo": "asc"}, {"nome": "asc"}],
+            "use_index": ["_design/idx_produtos_catalogo", "idx_produtos_catalogo"],
+            "limit": 100,
+        }
+    return {
+        "selector": {"tipo": "produto", "categoria_id": categoria_id, "ativo": True},
+        "fields": CAMPOS_DO_CARTAO,
+        "sort": [{"tipo": "asc"}, {"categoria_id": "asc"}, {"nome": "asc"}],
+        "use_index": ["_design/idx_produtos_categoria", "idx_produtos_categoria"],
+        "limit": 100,
+    }
+
+
+def consulta_cliente_por_email(email: str) -> dict:
+    return {
+        "selector": {"tipo": "cliente", "email": email},
+        "use_index": ["_design/idx_clientes_email", "idx_clientes_email"],
+        "limit": 1,
+    }
+
+
+def consulta_pedidos_do_cliente(cliente_id: str) -> dict:
+    # O filtro por cliente_id nunca sai daqui: sem ele, um cliente veria o
+    # histórico de todos os outros.
+    return {
+        "selector": {"tipo": "pedido", "cliente_id": cliente_id},
+        "sort": [{"tipo": "desc"}, {"cliente_id": "desc"}, {"criado_em": "desc"}],
+        "use_index": ["_design/idx_pedidos_cliente", "idx_pedidos_cliente"],
+        "limit": 50,
+    }
+
+
+def consulta_pedidos_pendentes() -> dict:
+    # Consulta de manutenção, usada só pela reconciliação. Roda SEM índice
+    # de propósito: um índice custa escrita em todo pedido gravado, e esta
+    # consulta roda raramente, sobre poucos documentos.
+    return {"selector": {"tipo": "pedido", "status": "PENDENTE"}, "limit": 500}
+
+
+# =====================================================================
+# Proteção contra CSRF
+#
+# Sem isto, um site malicioso aberto enquanto o cliente está logado poderia
+# disparar um POST para /checkout usando o cookie de sessão dele. A defesa é
+# um segredo que só o nosso HTML conhece: o token vive na sessão e volta num
+# campo escondido do formulário.
+# =====================================================================
+
 METODOS_QUE_ESCREVEM = ("POST", "PUT", "PATCH", "DELETE")
 
 
-# ---------------------------------------------------------------------
-# Protecao contra CSRF
-#
-# Sem isto, um site malicioso que voce visitasse enquanto logado poderia
-# disparar um POST para /checkout usando o SEU cookie de sessao, e o pedido
-# sairia de verdade. O navegador anexa o cookie automaticamente; ele nao
-# sabe distinguir um formulario nosso de um formulario de outra pagina.
-#
-# A defesa e um segredo que so o nosso HTML conhece: o token vive na sessao
-# e e reenviado num campo escondido. O site atacante nao consegue ler a
-# sessao, entao nao consegue forjar o campo.
-#
-# Escrito a mao em vez de usar o Flask-WTF: sao vinte linhas, nao adiciona
-# dependencia, e e codigo que o grupo consegue explicar na defesa.
-# ---------------------------------------------------------------------
-
 def token_csrf() -> str:
-    """Devolve o token da sessao, criando na primeira vez."""
     if "_csrf" not in session:
         session["_csrf"] = secrets.token_urlsafe(32)
     return session["_csrf"]
 
 
 def renovar_token_csrf() -> None:
-    """Troca o token. Chamado no login, contra fixacao de sessao."""
+    """Troca o token. Chamado no login, contra fixação de sessão."""
     session["_csrf"] = secrets.token_urlsafe(32)
 
 
 def login_obrigatorio(rota):
-    """Protege rotas que exigem cliente autenticado.
-
-    Guarda a URL pedida para devolver o cliente exatamente onde ele estava
-    depois do login — quem clica em "finalizar compra" sem estar logado
-    volta para o checkout, nao para a home.
-    """
+    """Protege rotas de cliente logado e devolve cada um aonde estava."""
 
     @wraps(rota)
     def envelope(*args, **kwargs):
@@ -359,27 +372,17 @@ def login_obrigatorio(rota):
     return envelope
 
 
-def cliente_atual() -> "Cliente | None":
-    cliente_id = session.get("cliente_id")
-    if not cliente_id:
-        return None
-    return db.session.get(Cliente, cliente_id)
-
-
-# ---------------------------------------------------------------------
+# =====================================================================
 # Carrinho
 #
-# Mora na sessao, nao no banco. O carrinho e PROCESSO, nao entidade: existe
-# so enquanto a compra nao fecha e nao tem valor historico. Ele vira
-# entidade — pedidos + itens_pedido — no instante do checkout.
+# Mora na sessão, não no banco: o carrinho é processo, não entidade. Só
+# vira documento — o pedido — no checkout. Formato na sessão:
 #
-# Formato na sessao:
-#     [{"produto_id": 3, "quantidade": 2, "moagem": "FINA"}, ...]
+#     [{"produto_id": "produto:chapada-geisha", "quantidade": 2, "moagem": "FINA"}]
 #
-# Guardamos apenas o id, nunca o preco: o preco e lido do banco a cada
-# exibicao e so e congelado no fechamento do pedido. Confiar num preco
-# vindo da sessao deixaria o cliente alterar o valor pelo cookie.
-# ---------------------------------------------------------------------
+# Nunca guarda o preço. O preço é lido do banco a cada exibição e só é
+# congelado dentro do pedido; confiar no cookie deixaria o cliente mudá-lo.
+# =====================================================================
 
 def ler_carrinho() -> list[dict]:
     return session.get("carrinho", [])
@@ -390,20 +393,22 @@ def gravar_carrinho(linhas: list[dict]) -> None:
     session.modified = True
 
 
-def carrinho_detalhado() -> tuple[list[dict], Decimal]:
-    """Junta as linhas da sessao com os produtos do banco.
+def carrinho_detalhado() -> tuple[list[dict], int]:
+    """Junta as linhas da sessão com os produtos do banco. Total em centavos."""
+    linhas_sessao = ler_carrinho()
+    if not linhas_sessao:
+        return [], 0
 
-    Linhas cujo produto sumiu do catalogo sao descartadas silenciosamente
-    aqui — o checkout trata esse caso com mensagem explicita.
-    """
-    linhas, total = [], Decimal("0")
+    # Uma ida ao banco para o carrinho inteiro (_all_docs com keys), em vez
+    # de um GET por linha.
+    produtos = banco().obter_varios(sorted({linha["produto_id"] for linha in linhas_sessao}))
 
-    for linha in ler_carrinho():
-        produto = db.session.get(Produto, linha["produto_id"])
-        if produto is None:
-            continue
-
-        subtotal = produto.preco * linha["quantidade"]
+    linhas, total = [], 0
+    for linha in linhas_sessao:
+        produto = produtos.get(linha["produto_id"])
+        if produto is None or not produto.get("ativo"):
+            continue  # o checkout trata esse caso com mensagem explícita
+        subtotal = produto["preco_centavos"] * linha["quantidade"]
         total += subtotal
         linhas.append(
             {
@@ -413,26 +418,105 @@ def carrinho_detalhado() -> tuple[list[dict], Decimal]:
                 "subtotal": subtotal,
             }
         )
-
     return linhas, total
 
 
 # =====================================================================
-# A transacao de checkout
-#
-# O coracao do trabalho. Tudo-ou-nada:
-#
-#     BEGIN
-#      |- SELECT ... FOR UPDATE  (trava o estoque de cada cafe)
-#      |- valida existencia e saldo de TODOS os itens
-#      |- INSERT do pedido
-#      |- INSERT de cada item, com preco_unitario congelado
-#      |- UPDATE do estoque
-#      +- COMMIT   ·   ROLLBACK em qualquer falha
+# Clientes
 # =====================================================================
 
+class EmailJaCadastrado(Exception):
+    pass
+
+
+def cadastrar_cliente(nome: str, email: str, senha: str) -> dict:
+    """Cria o cliente garantindo e-mail único.
+
+    O CouchDB não tem UNIQUE. A única unicidade que ele garante é a do _id:
+    dois PUT no mesmo _id sem _rev, um grava e o outro recebe 409. Por isso a
+    unicidade do e-mail mora num documento cujo _id É o e-mail. Consultar o
+    índice antes de gravar não bastaria — entre a consulta e a gravação,
+    outro cadastro com o mesmo e-mail pode entrar.
+    """
+    b = banco()
+    agora = agora_iso()
+    cliente = {
+        "_id": f"cliente:{uuid.uuid4()}",
+        "tipo": "cliente",
+        "nome": nome,
+        "email": email,
+        # A senha em texto puro morre aqui: só o hash segue para o banco.
+        "senha_hash": generate_password_hash(senha),
+        "criado_em": agora,
+        "versao_esquema": VERSAO_ESQUEMA,
+    }
+    chave_email = {
+        "_id": f"email:{email}",
+        "tipo": "email",
+        "cliente_id": cliente["_id"],
+        "criado_em": agora,
+        "versao_esquema": VERSAO_ESQUEMA,
+    }
+
+    try:
+        b.salvar(chave_email)
+    except Conflito:
+        raise EmailJaCadastrado(email) from None
+
+    try:
+        b.salvar(cliente)
+    except ErroBanco:
+        # Compensação: sem isto, o e-mail ficaria preso a um cliente que
+        # nunca foi gravado, e ninguém mais conseguiria usá-lo.
+        try:
+            b.apagar(chave_email["_id"], chave_email["_rev"])
+        except ErroBanco:
+            log.exception("%s ficou reservado; a reconciliação libera", chave_email["_id"])
+        raise
+
+    return cliente
+
+
+def buscar_cliente_por_email(email: str) -> dict | None:
+    encontrados = banco().buscar(consulta_cliente_por_email(email))
+    return encontrados[0] if encontrados else None
+
+
+# =====================================================================
+# Checkout — a saga
+#
+# No PostgreSQL o checkout era uma transação: o banco garantia o
+# tudo-ou-nada. No CouchDB a unidade de consistência é UM documento, e o
+# pedido mexe em vários (o pedido e cada café). O tudo-ou-nada passa a ser
+# responsabilidade da aplicação:
+#
+#   1. ler e validar       nada é gravado se faltar estoque ou café
+#   2. registrar intenção  o pedido nasce PENDENTE — é o diário da saga
+#   3. reservar estoque    um _bulk_docs; cada café baixa o saldo e ganha
+#                          uma marca {pedido_id: quantidade}; 409 -> relê
+#   4. confirmar           o pedido vira CRIADO: o ponto sem volta
+#   5. limpar marcas       melhor esforço; sobra só lixo inofensivo
+#
+#   falha em 3 ou 4  ->  compensação: pedido CANCELADO, depois o estoque
+#                        de cada marca volta para o café
+#
+# A marca de reserva é o que torna a compensação exata. Um timeout no meio
+# do _bulk_docs não diz o que foi gravado — a marca diz. Devolver só onde há
+# marca faz a compensação poder rodar de novo sem devolver em dobro.
+# =====================================================================
+
+MENSAGEM_INDISPONIVEL = (
+    "Um dos cafés do seu carrinho não está mais disponível. "
+    "Revise o carrinho e tente de novo."
+)
+MENSAGEM_INTERROMPIDO = (
+    "Não conseguimos concluir o pedido agora. Nenhum pedido foi gerado — "
+    "tente de novo em instantes."
+)
+
+
 class ErroCheckout(Exception):
-    """Falha de negocio que impede o fechamento do pedido."""
+    """Falha que impede o fechamento do pedido."""
 
 
 class CarrinhoVazio(ErroCheckout):
@@ -454,102 +538,355 @@ class EstoqueInsuficiente(ErroCheckout):
         )
 
 
-def finalizar_pedido(cliente_id: int, linhas_carrinho: list[dict]) -> Pedido:
-    """Transforma o carrinho em pedido persistido, em transacao unica.
+class PedidoDuplicado(ErroCheckout):
+    """A mesma compra chegou duas vezes (duplo clique, F5 no POST)."""
 
-    Ou grava tudo — pedido, itens e baixa de estoque — ou nao grava nada.
-    Levanta ErroCheckout em qualquer falha de negocio, sempre depois de
-    desfazer a transacao inteira.
+    def __init__(self, pedido: dict):
+        self.pedido = pedido
+        super().__init__("Este pedido já tinha sido registrado.")
+
+
+class CheckoutInterrompido(ErroCheckout):
+    """O banco falhou no meio da saga."""
+
+
+def _montar_pedido(pedido_id: str, cliente_id: str, linhas: list[dict], produtos: dict) -> dict:
+    itens = []
+    for linha in linhas:
+        produto = produtos[linha["produto_id"]]
+        itens.append(
+            {
+                # Referência: o café tem vida própria fora do pedido.
+                "produto_id": produto["_id"],
+                # Snapshot: nome e preço copiados para dentro do pedido. Se o
+                # café mudar de nome ou de preço amanhã, o pedido de hoje não
+                # muda — é o preco_unitario congelado do projeto relacional,
+                # agora resolvido pelo formato do próprio documento.
+                "nome": produto["nome"],
+                "moagem": linha["moagem"],
+                "quantidade": linha["quantidade"],
+                "preco_unitario_centavos": produto["preco_centavos"],
+            }
+        )
+
+    agora = agora_iso()
+    return {
+        "_id": pedido_id,
+        "tipo": "pedido",
+        "cliente_id": cliente_id,
+        "status": "PENDENTE",
+        # Embed: os itens são lidos junto com o pedido, nunca sozinhos, e
+        # são limitados pelo carrinho — não crescem sem fim.
+        "itens": itens,
+        "total_centavos": sum(i["quantidade"] * i["preco_unitario_centavos"] for i in itens),
+        "criado_em": agora,
+        "historico": [{"status": "PENDENTE", "em": agora}],
+        "versao_esquema": VERSAO_ESQUEMA,
+    }
+
+
+def _mudar_status(pedido: dict, status: str, motivo: str | None = None) -> None:
+    pedido["status"] = status
+    evento = {"status": status, "em": agora_iso()}
+    if motivo:
+        evento["motivo"] = motivo
+    pedido["historico"].append(evento)
+
+
+def _reservar(produto: dict, pedido_id: str, quantidade: int) -> dict | None:
+    reservas = produto.setdefault("reservas", {})
+    if pedido_id in reservas:
+        return None  # já reservado nesta saga: repetir não baixa de novo
+    if not produto.get("ativo"):
+        raise ProdutoInexistente(MENSAGEM_INDISPONIVEL)
+    if produto["estoque"] < quantidade:
+        raise EstoqueInsuficiente(produto["nome"], produto["estoque"], quantidade)
+    produto["estoque"] -= quantidade
+    reservas[pedido_id] = quantidade
+    return produto
+
+
+def _devolver_reserva(produto: dict, pedido_id: str) -> dict | None:
+    quantidade = produto.get("reservas", {}).pop(pedido_id, None)
+    if quantidade is None:
+        return None  # a reserva nunca entrou, ou já foi devolvida
+    produto["estoque"] += quantidade
+    return produto
+
+
+def _liberar_marca(produto: dict, pedido_id: str) -> dict | None:
+    if produto.get("reservas", {}).pop(pedido_id, None) is None:
+        return None
+    return produto
+
+
+def _limpar_marcas(pedido: dict) -> None:
+    """Fase 5: tira as marcas de reserva de um pedido confirmado."""
+    produtos = sorted({item["produto_id"] for item in pedido["itens"]})
+    try:
+        banco().atualizar_varios(
+            produtos,
+            lambda doc: _liberar_marca(doc, pedido["_id"]),
+            ignorar_ausentes=True,
+        )
+    except ErroBanco:
+        # O pedido já está confirmado e o estoque, baixado. A marca que sobrar
+        # não muda saldo nenhum; a reconciliação limpa depois.
+        log.warning("marcas de reserva do %s ficaram para a reconciliação", pedido["_id"], exc_info=True)
+
+
+def cancelar_e_devolver(pedido_id: str, motivo: str) -> dict:
+    """A compensação. Devolve o pedido como ele ficou no banco.
+
+    A ordem importa. Primeiro o pedido vira CANCELADO — é esse registro que
+    decide o destino da compra. Só depois o estoque volta. Se o pedido já
+    estava CRIADO (a confirmação foi gravada, só a resposta se perdeu), nada
+    é desfeito: a compra valeu.
+
+    Sempre relê o pedido do banco. Depois de uma gravação que falhou, a cópia
+    em memória não é confiável — ela pode dizer CRIADO sem que o banco saiba.
+    """
+    b = banco()
+
+    def cancelar(doc: dict) -> dict | None:
+        if doc["status"] != "PENDENTE":
+            return None  # já cancelado, ou já confirmado: não mexe
+        _mudar_status(doc, "CANCELADO", motivo)
+        return doc
+
+    pedido = b.atualizar(pedido_id, cancelar)
+    if pedido["status"] != "CANCELADO":
+        return pedido
+
+    b.atualizar_varios(
+        sorted({item["produto_id"] for item in pedido["itens"]}),
+        lambda doc: _devolver_reserva(doc, pedido_id),
+        ignorar_ausentes=True,
+    )
+    return pedido
+
+
+def finalizar_pedido(cliente_id: str, linhas_carrinho: list[dict], chave: str | None = None) -> dict:
+    """Transforma o carrinho em pedido confirmado, ou não deixa nada valendo.
+
+    `chave` é a chave de idempotência da compra e vira o _id do pedido. A
+    mesma compra enviada duas vezes esbarra no mesmo _id e não baixa o
+    estoque duas vezes.
     """
     if not linhas_carrinho:
         raise CarrinhoVazio("Seu carrinho está vazio.")
 
+    b = banco()
+    pedido_id = f"pedido:{chave or uuid.uuid4().hex}"
+
+    existente = b.obter_ou_none(pedido_id)
+    if existente is not None:
+        raise PedidoDuplicado(existente)
+
+    # Quantidade total por café, somando as moagens: 2 em grão e 1 moído fino
+    # do mesmo café saem do mesmo estoque.
+    por_produto: dict[str, int] = {}
+    for linha in linhas_carrinho:
+        por_produto[linha["produto_id"]] = por_produto.get(linha["produto_id"], 0) + linha["quantidade"]
+    ids = sorted(por_produto)
+
+    # --- Fase 1: ler e validar tudo, sem gravar nada ---------------------
+    produtos = b.obter_varios(ids)
+    for produto_id in ids:
+        produto = produtos[produto_id]
+        if produto is None or not produto.get("ativo"):
+            raise ProdutoInexistente(MENSAGEM_INDISPONIVEL)
+        if produto["estoque"] < por_produto[produto_id]:
+            raise EstoqueInsuficiente(produto["nome"], produto["estoque"], por_produto[produto_id])
+
+    pedido = _montar_pedido(pedido_id, cliente_id, linhas_carrinho, produtos)
+    validar_pedido(pedido)
+
+    # --- Fase 2: registrar a intenção ------------------------------------
     try:
-        # Trava sempre na mesma ordem crescente de id. Duas compras
-        # simultaneas que travassem os mesmos cafes em ordens opostas
-        # ficariam em deadlock, uma esperando o lock da outra; ordenar
-        # elimina o ciclo antes que ele exista.
-        ordenadas = sorted(linhas_carrinho, key=lambda l: l["produto_id"])
+        b.salvar(pedido)
+    except Conflito:
+        # Outra requisição com a mesma chave gravou entre a checagem e aqui.
+        raise PedidoDuplicado(b.obter(pedido_id)) from None
 
-        # --- Fase 1: travar e validar TODOS os itens -------------------
-        #
-        # Nada e inserido antes desta fase terminar. Assim o caso de erro
-        # nao chega sequer a criar o cabecalho do pedido — o rollback
-        # continua sendo obrigatorio, mas o banco trabalha menos.
-        travados = []
-        for linha in ordenadas:
-            # with_for_update() gera o SELECT ... FOR UPDATE: segura a linha
-            # do produto ate o fim da transacao. Sem isso, duas compras
-            # simultaneas leem o mesmo estoque 1, ambas aprovam, e o mesmo
-            # lote e vendido duas vezes.
-            produto = db.session.scalar(
-                db.select(Produto)
-                .where(Produto.id == linha["produto_id"])
-                .with_for_update()
+    # --- Fases 3 e 4: reservar e confirmar -------------------------------
+    try:
+        try:
+            b.atualizar_varios(
+                ids,
+                lambda doc: _reservar(doc, pedido_id, por_produto[doc["_id"]]),
+                docs=produtos,
             )
+        except NaoEncontrado:
+            raise ProdutoInexistente(MENSAGEM_INDISPONIVEL) from None
 
-            if produto is None:
-                raise ProdutoInexistente(
-                    "Um dos cafés do seu carrinho não está mais disponível. "
-                    "Revise o carrinho e tente de novo."
-                )
+        _mudar_status(pedido, "CRIADO")
+        b.salvar(pedido)
 
-            if produto.estoque < linha["quantidade"]:
-                raise EstoqueInsuficiente(
-                    produto.nome, produto.estoque, linha["quantidade"]
-                )
-
-            travados.append((produto, linha))
-
-        # --- Fase 2: gravar -------------------------------------------
-        pedido = Pedido(
-            cliente_id=cliente_id, status="CRIADO", total=Decimal("0")
+    except (ErroCheckout, ErroBanco) as falha:
+        motivo = (
+            str(falha)
+            if isinstance(falha, ErroCheckout)
+            else "Falha de comunicação com o banco durante o checkout."
         )
-        db.session.add(pedido)
+        try:
+            situacao = cancelar_e_devolver(pedido_id, motivo)
+        except ErroBanco:
+            # Nem a compensação conseguiu falar com o banco. O pedido fica
+            # PENDENTE com as marcas de reserva, e `flask reconciliar` termina.
+            log.exception("compensação do %s não concluiu", pedido_id)
+            raise CheckoutInterrompido(MENSAGEM_INTERROMPIDO) from falha
 
-        # flush envia o INSERT e recebe o id gerado pela sequence, sem
-        # encerrar a transacao. O commit continua sendo o unico ponto em
-        # que algo se torna definitivo.
-        db.session.flush()
+        if situacao["status"] != "CANCELADO":
+            # A confirmação tinha sido gravada; só a resposta se perdeu.
+            _limpar_marcas(situacao)
+            return situacao
+        if isinstance(falha, ErroCheckout):
+            raise
+        raise CheckoutInterrompido(MENSAGEM_INTERROMPIDO) from falha
 
-        total = Decimal("0")
-        for produto, linha in travados:
-            db.session.add(
-                ItemPedido(
-                    pedido_id=pedido.id,
-                    produto_id=produto.id,
-                    quantidade=linha["quantidade"],
-                    # Congelado aqui, e so aqui. Se o preco deste cafe mudar
-                    # amanha, este pedido mantem o valor de hoje.
-                    preco_unitario=produto.preco,
-                    moagem=linha["moagem"],
-                )
-            )
-            produto.estoque -= linha["quantidade"]
-            total += produto.preco * linha["quantidade"]
-
-        pedido.total = total
-        db.session.commit()
-        return pedido
-
-    except Exception:
-        # Vale para o erro de negocio e para o inesperado: o banco nao fica
-        # com pedido pela metade em nenhum dos dois casos.
-        db.session.rollback()
-        raise
+    # --- Fase 5: limpar as marcas ----------------------------------------
+    _limpar_marcas(pedido)
+    return pedido
 
 
-def formatar_brl(valor) -> str:
-    """Formata no padrao brasileiro: R$ 1.234,56.
+# =====================================================================
+# Reconciliação
+# =====================================================================
 
-    A troca dupla existe porque o Python formata no padrao americano
-    (1,234.56) e nao ha locale pt-BR garantido no container do deploy —
-    depender de `locale.setlocale` quebraria em producao.
+def reconciliar(minutos: int = 10) -> dict[str, list[str]]:
+    """Termina o que uma saga interrompida deixou pela metade.
+
+    Uma função serverless pode morrer entre duas gravações. O PostgreSQL
+    resolveria isso sozinho no restart, pelo log de transações; aqui quem
+    resolve é esta rotina, lendo o estado que a saga deixou nos documentos.
+    Tudo nela é idempotente: pode rodar a qualquer hora, quantas vezes for.
     """
-    if valor is None:
-        return "R$ 0,00"
-    inteiro = f"{Decimal(valor):,.2f}"
-    return "R$ " + inteiro.replace(",", "_").replace(".", ",").replace("_", ".")
+    b = banco()
+    limite = (datetime.now(timezone.utc) - timedelta(minutes=minutos)).isoformat(timespec="milliseconds")
+    relatorio: dict[str, list[str]] = {
+        "pedidos_cancelados": [],
+        "reservas_devolvidas": [],
+        "marcas_limpas": [],
+        "emails_liberados": [],
+    }
+
+    # 1. Pedidos PENDENTE antigos: a saga morreu antes de confirmar.
+    for pedido in b.buscar(consulta_pedidos_pendentes()):
+        if pedido["criado_em"] < limite:
+            situacao = cancelar_e_devolver(
+                pedido["_id"], "Checkout interrompido; cancelado pela reconciliação."
+            )
+            if situacao["status"] == "CANCELADO":
+                relatorio["pedidos_cancelados"].append(pedido["_id"])
+
+    # 2. Marcas de reserva que sobraram nos cafés.
+    for produto in b.listar_por_prefixo("produto:"):
+        for pedido_id in list(produto.get("reservas", {})):
+            pedido = b.obter_ou_none(pedido_id)
+            if pedido is not None and pedido["status"] == "PENDENTE":
+                continue  # checkout em andamento, ou recente demais para julgar
+            if pedido is None or pedido["status"] == "CANCELADO":
+                b.atualizar(produto["_id"], lambda doc, p=pedido_id: _devolver_reserva(doc, p))
+                relatorio["reservas_devolvidas"].append(f"{produto['_id']} <- {pedido_id}")
+            else:
+                b.atualizar(produto["_id"], lambda doc, p=pedido_id: _liberar_marca(doc, p))
+                relatorio["marcas_limpas"].append(f"{produto['_id']} <- {pedido_id}")
+
+    # 3. E-mails reservados por um cadastro que caiu antes de gravar o cliente.
+    for chave_email in b.listar_por_prefixo("email:"):
+        if chave_email.get("criado_em", "") < limite and b.obter_ou_none(chave_email["cliente_id"]) is None:
+            b.apagar(chave_email["_id"], chave_email["_rev"])
+            relatorio["emails_liberados"].append(chave_email["_id"])
+
+    return relatorio
+
+
+# =====================================================================
+# Preparação do banco
+# =====================================================================
+
+def preparar_banco() -> list[str]:
+    """Cria o banco, a validate_doc_update e os índices Mango. Idempotente."""
+    b = banco()
+    passos = ["banco criado" if b.criar_banco() else "banco já existia"]
+
+    regras = {
+        "_id": "_design/regras",
+        "language": "javascript",
+        "validate_doc_update": (PASTA_COUCHDB / "validacao.js").read_text(encoding="utf-8"),
+    }
+    atual = b.obter_ou_none("_design/regras")
+    if atual and atual.get("validate_doc_update") == regras["validate_doc_update"]:
+        passos.append("validate_doc_update já estava atualizada")
+    else:
+        if atual:
+            regras["_rev"] = atual["_rev"]
+        b.salvar(regras)
+        passos.append("validate_doc_update gravada em _design/regras")
+
+    indices = json.loads((PASTA_COUCHDB / "indices.json").read_text(encoding="utf-8"))
+    for indice in indices:
+        resultado = b.criar_indice(indice["definicao"])
+        passos.append(f"índice {indice['definicao']['name']}: {resultado.get('result')}")
+
+    return passos
+
+
+def carregar_catalogo() -> int:
+    """Grava as 4 regiões e os 12 cafés de couchdb/seed.json.
+
+    Um único _bulk_docs para os 16 documentos. Rodar de novo atualiza os
+    existentes no lugar, com o _rev atual de cada um — e recoloca o estoque
+    da carga inicial. Clientes e pedidos não são tocados.
+    """
+    b = banco()
+    docs = json.loads((PASTA_COUCHDB / "seed.json").read_text(encoding="utf-8"))
+    for doc in docs:
+        if doc["tipo"] == "produto":
+            validar_produto(doc)
+
+    existentes = b.obter_varios([doc["_id"] for doc in docs])
+    for doc in docs:
+        if existentes.get(doc["_id"]):
+            doc["_rev"] = existentes[doc["_id"]]["_rev"]
+
+    recusados = [r for r in b.gravar_lote(docs) if "error" in r]
+    if recusados:
+        raise click.ClickException(f"{len(recusados)} documento(s) recusado(s): {recusados}")
+    return len(docs)
+
+
+def registrar_comandos(app: Flask) -> None:
+    @app.cli.command("init-db")
+    def init_db() -> None:
+        """Cria o banco, a validate_doc_update e os índices Mango."""
+        for passo in preparar_banco():
+            click.echo(passo)
+
+    @app.cli.command("seed-db")
+    def seed_db() -> None:
+        """Carrega as 4 regiões e os 12 cafés."""
+        total = carregar_catalogo()
+        click.echo(f"Carga concluída: {total} documentos gravados")
+
+    @app.cli.command("reset-db")
+    @click.confirmation_option(prompt="Isto apaga o banco inteiro, com clientes e pedidos. Continuar?")
+    def reset_db() -> None:
+        """Apaga e recria tudo. Só para desenvolvimento."""
+        banco().apagar_banco()
+        for passo in preparar_banco():
+            click.echo(passo)
+        click.echo(f"Banco recriado do zero: {carregar_catalogo()} documentos")
+
+    @app.cli.command("reconciliar")
+    @click.option("--minutos", default=10, show_default=True, help="Idade para considerar um checkout abandonado.")
+    def reconciliar_cmd(minutos: int) -> None:
+        """Termina sagas de checkout interrompidas."""
+        for categoria, itens in reconciliar(minutos).items():
+            click.echo(f"{categoria}: {len(itens)}")
+            for item in itens:
+                click.echo(f"  {item}")
 
 
 # =====================================================================
@@ -558,43 +895,35 @@ def formatar_brl(valor) -> str:
 
 def registrar_rotas(app: Flask) -> None:
     app.jinja_env.filters["brl"] = formatar_brl
-
-    # Disponivel em todo template como {{ token_csrf() }}
+    app.jinja_env.filters["slug"] = slug
+    app.jinja_env.filters["numero_pedido"] = numero_pedido
+    app.jinja_env.filters["data_brasilia"] = data_brasilia
+    app.jinja_env.filters["sca"] = lambda valor: f"{valor:.2f}"
+    app.jinja_env.filters["status"] = lambda valor: ROTULOS_STATUS.get(valor, valor.lower())
     app.jinja_env.globals["token_csrf"] = token_csrf
 
     @app.before_request
     def exigir_token_csrf():
-        """Barra qualquer escrita sem token valido, antes de tocar no banco."""
+        """Barra qualquer escrita sem token válido, antes de tocar no banco."""
         if request.method not in METODOS_QUE_ESCREVEM:
             return
-
         enviado = request.form.get("_csrf", "")
         esperado = session.get("_csrf", "")
-
-        # compare_digest em vez de ==: comparacao de tempo constante, para
-        # nao vazar o token caractere a caractere pelo tempo de resposta.
+        # compare_digest: tempo constante, para não vazar o token pelo tempo
+        # de resposta.
         if not esperado or not secrets.compare_digest(enviado, esperado):
             abort(400, description="Sessão expirada. Recarregue a página e tente de novo.")
 
     @app.after_request
     def cabecalhos_de_seguranca(resposta):
-        """Os cabecalhos que o OWASP ZAP cobra, com o porque de cada um."""
-
-        # Impede o navegador de adivinhar o tipo do conteudo. Sem isto, um
-        # arquivo enviado como texto pode acabar executado como script.
+        """Os cabeçalhos que o OWASP ZAP cobrou no projeto relacional."""
         resposta.headers["X-Content-Type-Options"] = "nosniff"
-
-        # Ninguem coloca a loja dentro de um iframe — defesa contra
-        # clickjacking, em que um botao invisivel e sobreposto ao real.
         resposta.headers["X-Frame-Options"] = "DENY"
-
-        # Nao vaza a URL completa (com ids de pedido) para sites externos.
         resposta.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
 
-        # A politica de conteudo. script-src 'none' e possivel porque a loja
-        # nao usa JavaScript nenhum — o que torna XSS praticamente inviavel.
-        # As duas excecoes sao o Google Fonts: o CSS vem de googleapis e os
-        # arquivos de fonte de gstatic.
+        # A loja não usa JavaScript nenhum, então script-src 'none' é possível
+        # — o que torna XSS praticamente inviável. As exceções são o Google
+        # Fonts: o CSS vem de googleapis e os arquivos de fonte, de gstatic.
         resposta.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
             "style-src 'self' https://fonts.googleapis.com; "
@@ -606,16 +935,14 @@ def registrar_rotas(app: Flask) -> None:
             "base-uri 'none'"
         )
 
-        # HSTS so faz sentido sobre HTTPS. Atras do proxy do Railway o
-        # request.is_secure e falso, entao olhamos o cabecalho encaminhado.
+        # HSTS só faz sentido sobre HTTPS. Atrás do proxy do Vercel o
+        # request.is_secure é falso, então olhamos o protocolo encaminhado.
         encaminhado = request.headers.get("X-Forwarded-Proto", "")
         if request.is_secure or encaminhado == "https":
-            resposta.headers["Strict-Transport-Security"] = (
-                "max-age=31536000; includeSubDomains"
-            )
+            resposta.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
-        # Pagina de cliente logado nao fica em cache: em computador
-        # compartilhado, o botao voltar mostraria o pedido de quem saiu.
+        # Página de cliente logado não fica em cache: em computador
+        # compartilhado, o botão voltar mostraria o pedido de quem saiu.
         if session.get("cliente_id"):
             resposta.headers["Cache-Control"] = "no-store"
 
@@ -623,66 +950,69 @@ def registrar_rotas(app: Flask) -> None:
 
     @app.context_processor
     def injetar_contexto():
-        """Cliente logado e contador do carrinho, disponiveis em todo template."""
+        # O nome vem da sessão, gravado no login. No relacional esta função
+        # buscava o cliente no banco a cada página; aqui isso seria uma ida
+        # ao Cloudant por requisição só para escrever "Sair" no menu.
         return {
-            "cliente_logado": cliente_atual(),
-            "itens_no_carrinho": sum(
-                linha["quantidade"] for linha in ler_carrinho()
-            ),
+            "cliente_logado": session.get("cliente_nome") if session.get("cliente_id") else None,
+            "itens_no_carrinho": sum(linha["quantidade"] for linha in ler_carrinho()),
         }
 
+    @app.errorhandler(BancoIndisponivel)
+    def banco_fora_do_ar(erro):
+        log.error("banco indisponível: %s", erro)
+        return render_template("indisponivel.html"), 503
+
     # -----------------------------------------------------------------
-    # RF01 — Catalogo
+    # Saúde — para monitoramento externo
+    # -----------------------------------------------------------------
+    @app.route("/saude")
+    def saude():
+        inicio = time.perf_counter()
+        try:
+            banco().info_banco()
+            estado, codigo = "ok", 200
+        except ErroBanco:
+            estado, codigo = "indisponivel", 503
+        latencia = round((time.perf_counter() - inicio) * 1000)
+        return jsonify(aplicacao="ok", couchdb=estado, latencia_ms=latencia), codigo
+
+    # -----------------------------------------------------------------
+    # RF01 — Catálogo
     # -----------------------------------------------------------------
     @app.route("/")
     def catalogo():
-        categorias = db.session.scalars(
-            db.select(Categoria).order_by(Categoria.nome)
-        ).all()
+        b = banco()
 
-        consulta = db.select(Produto).order_by(Produto.nome)
+        # As regiões vêm do índice primário, pela faixa de _id
+        # "categoria:" — sem consulta Mango e sem índice secundário.
+        categorias = b.listar_por_prefixo("categoria:")
 
-        # O filtro por regiao e a consulta que justifica o
-        # idx_produtos_categoria: sem indice, seq scan em produtos inteiro.
-        categoria_id = request.args.get("categoria", type=int)
-        if categoria_id:
-            consulta = consulta.where(Produto.categoria_id == categoria_id)
-
-        produtos = db.session.scalars(consulta).all()
+        regiao = request.args.get("regiao", "")
+        produtos = b.buscar(consulta_catalogo(f"categoria:{regiao}" if regiao else None))
 
         return render_template(
-            "catalogo.html",
-            produtos=produtos,
-            categorias=categorias,
-            categoria_ativa=categoria_id,
+            "catalogo.html", produtos=produtos, categorias=categorias, regiao_ativa=regiao
         )
 
     # -----------------------------------------------------------------
     # RF02 — Detalhe do produto
     # -----------------------------------------------------------------
-    @app.route("/produto/<int:produto_id>")
-    def produto(produto_id: int):
-        # get_or_404 devolve 404 limpo em vez de estourar AttributeError
-        # numa pagina de erro 500 — criterio de aceite do RF02.
-        item = db.get_or_404(
-            Produto, produto_id, description="Café não encontrado."
-        )
-        return render_template("produto.html", produto=item)
+    @app.route("/produto/<slug_produto>")
+    def produto(slug_produto: str):
+        b = banco()
+        doc = b.obter_ou_none(f"produto:{slug_produto}")
+        if doc is None or not doc.get("ativo"):
+            abort(404, description="Café não encontrado.")
+
+        # A região vem embutida no produto (nome e estado, o que o cartão
+        # mostra), mas a descrição longa mora só no documento da categoria:
+        # referência, lida aqui pelo _id.
+        categoria = b.obter_ou_none(doc["categoria_id"])
+        return render_template("produto.html", produto=doc, categoria=categoria)
 
     # -----------------------------------------------------------------
-    # Apresentacao do trabalho
-    #
-    # Nao faz parte do e-commerce: e a apresentacao da disciplina servida
-    # pela propria aplicacao, para ter um endereco facil de compartilhar.
-    # Feita sem JavaScript, como o resto do site — a navegacao entre os
-    # slides e o proprio scroll, com scroll-snap.
-    # -----------------------------------------------------------------
-    @app.route("/apresentacao")
-    def apresentacao():
-        return render_template("apresentacao.html")
-
-    # -----------------------------------------------------------------
-    # RF04 — Cadastro, login e sessao
+    # RF04 — Cadastro, login e sessão
     # -----------------------------------------------------------------
     @app.route("/cadastro", methods=["GET", "POST"])
     def cadastro():
@@ -697,33 +1027,26 @@ def registrar_rotas(app: Flask) -> None:
             flash("Preencha nome, e-mail e senha.", "erro")
             return render_template("cadastro.html", nome=nome, email=email)
 
+        if "@" not in email[1:]:
+            flash("Informe um e-mail válido.", "erro")
+            return render_template("cadastro.html", nome=nome, email=email)
+
         if len(senha) < 8:
             flash("A senha precisa ter pelo menos 8 caracteres.", "erro")
             return render_template("cadastro.html", nome=nome, email=email)
 
-        cliente = Cliente(
-            nome=nome,
-            email=email,
-            # A senha em texto puro morre aqui: so o hash segue para o banco.
-            senha_hash=generate_password_hash(senha),
-        )
-
         try:
-            db.session.add(cliente)
-            db.session.commit()
-        except IntegrityError:
-            # O UNIQUE de clientes.email e quem decide, nao um SELECT previo.
-            # Consultar antes de inserir abriria uma janela de corrida entre
-            # a checagem e o INSERT; deixar o banco recusar elimina a janela.
-            db.session.rollback()
+            cliente = cadastrar_cliente(nome, email, senha)
+        except EmailJaCadastrado:
             flash("Este e-mail já tem cadastro. Tente entrar.", "erro")
             return render_template("cadastro.html", nome=nome, email=email)
 
-        session["cliente_id"] = cliente.id
-        # Token novo apos autenticar: se alguem tivesse plantado uma
-        # sessao no navegador da vitima, ela deixa de valer agora.
+        session["cliente_id"] = cliente["_id"]
+        session["cliente_nome"] = cliente["nome"]
+        # Token novo depois de autenticar: se alguém tivesse plantado uma
+        # sessão no navegador da vítima, ela deixa de valer agora.
         renovar_token_csrf()
-        flash(f"Bem-vindo, {cliente.nome}.", "sucesso")
+        flash(f"Bem-vindo, {cliente['nome']}.", "sucesso")
         return redirect(url_for("catalogo"))
 
     @app.route("/login", methods=["GET", "POST"])
@@ -733,23 +1056,21 @@ def registrar_rotas(app: Flask) -> None:
 
         email = (request.form.get("email") or "").strip().lower()
         senha = request.form.get("senha") or ""
+        cliente = buscar_cliente_por_email(email)
 
-        cliente = db.session.scalar(
-            db.select(Cliente).where(Cliente.email == email)
-        )
-
-        # Mensagem unica para e-mail inexistente e senha errada: dizer qual
+        # Mensagem única para e-mail inexistente e senha errada: dizer qual
         # dos dois falhou entregaria a um atacante a lista de quem tem conta.
-        if not cliente or not check_password_hash(cliente.senha_hash, senha):
+        if not cliente or not check_password_hash(cliente["senha_hash"], senha):
             flash("E-mail ou senha inválidos.", "erro")
             return render_template("login.html", email=email)
 
-        session["cliente_id"] = cliente.id
+        session["cliente_id"] = cliente["_id"]
+        session["cliente_nome"] = cliente["nome"]
         renovar_token_csrf()
-        flash(f"Bem-vindo de volta, {cliente.nome}.", "sucesso")
+        flash(f"Bem-vindo de volta, {cliente['nome']}.", "sucesso")
 
-        # Só aceita destino interno: `proximo` vem da URL e um atacante
-        # poderia mandar para fora do site (open redirect).
+        # Só aceita destino interno: `proximo` vem da URL e poderia mandar o
+        # cliente para fora do site (open redirect).
         proximo = request.args.get("proximo", "")
         if proximo.startswith("/") and not proximo.startswith("//"):
             return redirect(proximo)
@@ -769,17 +1090,17 @@ def registrar_rotas(app: Flask) -> None:
         linhas, total = carrinho_detalhado()
         return render_template("carrinho.html", linhas=linhas, total=total)
 
-    @app.route("/carrinho/adicionar/<int:produto_id>", methods=["POST"])
-    def adicionar_ao_carrinho(produto_id: int):
-        produto = db.session.get(Produto, produto_id)
-        if produto is None:
+    @app.route("/carrinho/adicionar/<slug_produto>", methods=["POST"])
+    def adicionar_ao_carrinho(slug_produto: str):
+        doc = banco().obter_ou_none(f"produto:{slug_produto}")
+        if doc is None or not doc.get("ativo"):
             flash("Este café não está mais disponível.", "erro")
             return redirect(url_for("catalogo"))
 
         moagem = request.form.get("moagem", "")
-        if moagem not in MOAGENS_VALIDAS:
+        if moagem not in MOAGENS:
             flash("Escolha uma moagem válida.", "erro")
-            return redirect(url_for("produto", produto_id=produto_id))
+            return redirect(url_for("produto", slug_produto=slug_produto))
 
         try:
             quantidade = int(request.form.get("quantidade", 1))
@@ -788,44 +1109,33 @@ def registrar_rotas(app: Flask) -> None:
 
         if quantidade < 1:
             flash("A quantidade precisa ser pelo menos 1.", "erro")
-            return redirect(url_for("produto", produto_id=produto_id))
+            return redirect(url_for("produto", slug_produto=slug_produto))
 
         linhas = ler_carrinho()
 
-        # A chave e o par (produto, moagem), nao o produto sozinho: meio
-        # quilo em grao e meio quilo moido fino sao duas linhas distintas
-        # do mesmo cafe. E a mesma regra da constraint
-        # uq_itens_pedido_produto_moagem no banco.
+        # A chave é o par (produto, moagem): meio quilo em grão e meio quilo
+        # moído fino são duas linhas do mesmo café. É a mesma regra que a
+        # validate_doc_update aplica aos itens do pedido.
         for linha in linhas:
-            if linha["produto_id"] == produto_id and linha["moagem"] == moagem:
+            if linha["produto_id"] == doc["_id"] and linha["moagem"] == moagem:
                 linha["quantidade"] += quantidade
                 break
         else:
-            linhas.append(
-                {
-                    "produto_id": produto_id,
-                    "quantidade": quantidade,
-                    "moagem": moagem,
-                }
-            )
+            linhas.append({"produto_id": doc["_id"], "quantidade": quantidade, "moagem": moagem})
 
         gravar_carrinho(linhas)
-        flash(f"{produto.nome} adicionado ao carrinho.", "sucesso")
+        flash(f"{doc['nome']} adicionado ao carrinho.", "sucesso")
         return redirect(url_for("carrinho"))
 
     @app.route("/carrinho/remover", methods=["POST"])
     def remover_do_carrinho():
-        produto_id = request.form.get("produto_id", type=int)
+        produto_id = request.form.get("produto_id", "")
         moagem = request.form.get("moagem", "")
-
         linhas = [
             linha
             for linha in ler_carrinho()
-            if not (
-                linha["produto_id"] == produto_id and linha["moagem"] == moagem
-            )
+            if not (linha["produto_id"] == produto_id and linha["moagem"] == moagem)
         ]
-
         gravar_carrinho(linhas)
         flash("Item removido do carrinho.", "sucesso")
         return redirect(url_for("carrinho"))
@@ -837,33 +1147,46 @@ def registrar_rotas(app: Flask) -> None:
         return redirect(url_for("carrinho"))
 
     # -----------------------------------------------------------------
-    # RF05 — Checkout transacional
+    # RF05 — Checkout
     # -----------------------------------------------------------------
     @app.route("/checkout", methods=["GET", "POST"])
     @login_obrigatorio
     def checkout():
         linhas, total = carrinho_detalhado()
-
         if not linhas:
             flash("Seu carrinho está vazio.", "erro")
             return redirect(url_for("catalogo"))
 
+        # Chave de idempotência da compra. Nasce quando o cliente abre a tela
+        # de confirmação e vira o _id do pedido: um segundo clique em
+        # "Confirmar" tenta gravar o mesmo _id e não gera pedido em dobro.
+        chave = session.setdefault("checkout_chave", uuid.uuid4().hex)
+
         if request.method == "GET":
-            return render_template(
-                "checkout.html", linhas=linhas, total=total
-            )
+            return render_template("checkout.html", linhas=linhas, total=total)
 
         try:
-            pedido = finalizar_pedido(session["cliente_id"], ler_carrinho())
+            pedido = finalizar_pedido(session["cliente_id"], ler_carrinho(), chave=chave)
+        except PedidoDuplicado as duplicado:
+            session.pop("checkout_chave", None)
+            if duplicado.pedido["status"] == "CANCELADO":
+                flash("Aquela tentativa de compra foi cancelada. Confira o carrinho e tente de novo.", "erro")
+                return redirect(url_for("carrinho"))
+            gravar_carrinho([])
+            session["ultimo_pedido"] = duplicado.pedido["_id"]
+            flash(f"O pedido #{numero_pedido(duplicado.pedido['_id'])} já tinha sido registrado.", "sucesso")
+            return redirect(url_for("meus_pedidos"))
         except ErroCheckout as erro:
-            # A transacao ja foi desfeita dentro de finalizar_pedido. O
-            # carrinho continua intacto de proposito: o cliente corrige a
+            # O carrinho continua intacto de propósito: o cliente corrige a
             # quantidade e tenta de novo sem remontar a compra.
+            session.pop("checkout_chave", None)
             flash(str(erro), "erro")
             return redirect(url_for("carrinho"))
 
+        session.pop("checkout_chave", None)
         gravar_carrinho([])
-        flash(f"Pedido #{pedido.id} confirmado.", "sucesso")
+        session["ultimo_pedido"] = pedido["_id"]
+        flash(f"Pedido #{numero_pedido(pedido['_id'])} confirmado.", "sucesso")
         return redirect(url_for("meus_pedidos"))
 
     # -----------------------------------------------------------------
@@ -872,14 +1195,18 @@ def registrar_rotas(app: Flask) -> None:
     @app.route("/meus-pedidos")
     @login_obrigatorio
     def meus_pedidos():
-        # O filtro por cliente_id e a consulta que justifica o
-        # idx_pedidos_cliente. Nunca listar sem ele: sem o WHERE, um
-        # cliente veria o historico de todos os outros.
-        pedidos = db.session.scalars(
-            db.select(Pedido)
-            .where(Pedido.cliente_id == session["cliente_id"])
-            .order_by(Pedido.criado_em.desc())
-        ).all()
+        b = banco()
+        pedidos = b.buscar(consulta_pedidos_do_cliente(session["cliente_id"]))
+
+        # Ler a própria escrita. Os índices globais do Cloudant são
+        # eventualmente consistentes: logo depois do checkout, o pedido novo
+        # pode ainda não aparecer na consulta. O GET pelo _id não tem esse
+        # atraso, então o último pedido entra garantido por fora do índice.
+        ultimo = session.get("ultimo_pedido")
+        if ultimo and all(p["_id"] != ultimo for p in pedidos):
+            doc = b.obter_ou_none(ultimo)
+            if doc and doc["cliente_id"] == session["cliente_id"]:
+                pedidos.insert(0, doc)
 
         return render_template("meus_pedidos.html", pedidos=pedidos)
 

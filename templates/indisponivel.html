@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block titulo %}Voltamos em instantes — Torra &amp; Terra{% endblock %}
+
+{% block conteudo %}
+
+<section class="abertura">
+  <h1>Voltamos em instantes</h1>
+  <p class="abertura-texto">
+    Não conseguimos falar com o banco de dados agora. Tente de novo em alguns
+    instantes — o seu carrinho continua guardado.
+  </p>
+</section>
+
+<div class="acoes">
+  <a class="botao botao-primario" href="{{ url_for('catalogo') }}">Tentar de novo</a>
+</div>
+
+{% endblock %}

@@ -7,7 +7,7 @@
 <p class="migalha">
   <a href="{{ url_for('catalogo') }}">Catálogo</a>
   <span aria-hidden="true">/</span>
-  <a href="{{ url_for('catalogo', categoria=produto.categoria_id) }}">{{ produto.categoria.nome }}</a>
+  <a href="{{ url_for('catalogo', regiao=produto.categoria_id|slug) }}">{{ produto.categoria.nome }}</a>
 </p>
 
 <article class="produto">
@@ -33,7 +33,7 @@
       {% if produto.pontuacao_sca %}
         <div class="ficha-linha">
           <dt>Pontuação SCA</dt>
-          <dd>{{ produto.pontuacao_sca }}</dd>
+          <dd>{{ produto.pontuacao_sca|sca }}</dd>
         </div>
       {% endif %}
       <div class="ficha-linha">
@@ -46,14 +46,14 @@
       </div>
     </dl>
 
-    {% if produto.categoria.descricao %}
-      <p class="regiao-descricao">{{ produto.categoria.descricao }}</p>
+    {% if categoria and categoria.descricao %}
+      <p class="regiao-descricao">{{ categoria.descricao }}</p>
     {% endif %}
   </div>
 
   <aside class="compra">
     <p class="preco preco-grande">
-      {{ produto.preco|brl }}<span class="preco-peso"> / {{ produto.peso_g }} g</span>
+      {{ produto.preco_centavos|brl }}<span class="preco-peso"> / {{ produto.peso_g }} g</span>
     </p>
 
     {% if produto.estoque == 0 %}
@@ -64,7 +64,7 @@
       {% endif %}
 
       <form class="formulario" method="post"
-            action="{{ url_for('adicionar_ao_carrinho', produto_id=produto.id) }}">
+            action="{{ url_for('adicionar_ao_carrinho', slug_produto=produto['_id']|slug) }}">
         <input type="hidden" name="_csrf" value="{{ token_csrf() }}">
 
         <div class="campo">

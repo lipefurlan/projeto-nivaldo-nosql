@@ -12,12 +12,12 @@
     <article class="pedido">
       <header class="pedido-cabecalho">
         <div>
-          <p class="pedido-numero">Pedido #{{ pedido.id }}</p>
-          <p class="linha-detalhe">{{ pedido.criado_em.strftime('%d/%m/%Y às %H:%M') }}</p>
+          <p class="pedido-numero">Pedido #{{ pedido['_id']|numero_pedido }}</p>
+          <p class="linha-detalhe">{{ pedido.criado_em|data_brasilia }}</p>
         </div>
         <div class="linha-valores">
-          <span class="selo">{{ pedido.status|lower }}</span>
-          <p class="preco">{{ pedido.total|brl }}</p>
+          <span class="selo selo-{{ pedido.status|lower }}">{{ pedido.status|status }}</span>
+          <p class="preco">{{ pedido.total_centavos|brl }}</p>
         </div>
       </header>
 
@@ -25,17 +25,24 @@
         {% for item in pedido.itens %}
           <li class="pedido-item">
             <span>
-              {{ item.quantidade }} × {{ item.produto.nome }}
+              {{ item.quantidade }} × {{ item.nome }}
               <span class="linha-detalhe">— moagem {{ item.moagem|lower }}</span>
             </span>
-            <span>{{ item.subtotal|brl }}</span>
+            <span>{{ (item.quantidade * item.preco_unitario_centavos)|brl }}</span>
           </li>
         {% endfor %}
       </ul>
 
-      <p class="campo-ajuda">
-        Os valores acima são os preços da data da compra, congelados no pedido.
-      </p>
+      {% if pedido.status == 'CANCELADO' %}
+        <p class="campo-ajuda">
+          {{ pedido.historico[-1].motivo or 'Pedido cancelado.' }}
+          O estoque reservado para este pedido voltou para a loja.
+        </p>
+      {% else %}
+        <p class="campo-ajuda">
+          Os valores acima são os preços da data da compra, congelados no pedido.
+        </p>
+      {% endif %}
     </article>
   {% endfor %}
 

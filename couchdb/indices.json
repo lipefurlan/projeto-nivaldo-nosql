@@ -1,0 +1,46 @@
+[
+  {
+    "consulta": "Catálogo: cafés ativos em ordem alfabética (RF01)",
+    "seletor": { "tipo": "produto", "ativo": true },
+    "justificativa": "É a consulta mais frequente da loja — roda em toda visita à página inicial. Sem índice, o CouchDB varre o banco inteiro, clientes e pedidos junto. O campo nome entra no índice porque o Mango só ordena por campos indexados, na mesma ordem.",
+    "definicao": {
+      "index": { "fields": ["tipo", "ativo", "nome"] },
+      "name": "idx_produtos_catalogo",
+      "ddoc": "idx_produtos_catalogo",
+      "type": "json"
+    }
+  },
+  {
+    "consulta": "Catálogo filtrado por região (RF01)",
+    "seletor": { "tipo": "produto", "categoria_id": "categoria:<região>", "ativo": true },
+    "justificativa": "O filtro por região do catálogo. O índice leva direto aos três cafés da região; o campo ativo é conferido em memória sobre esses três, o que não justifica um quarto campo no índice.",
+    "definicao": {
+      "index": { "fields": ["tipo", "categoria_id", "nome"] },
+      "name": "idx_produtos_categoria",
+      "ddoc": "idx_produtos_categoria",
+      "type": "json"
+    }
+  },
+  {
+    "consulta": "Cliente pelo e-mail, no login (RF04)",
+    "seletor": { "tipo": "cliente", "email": "<e-mail>" },
+    "justificativa": "Todo login procura um cliente pelo e-mail. Sem índice, cada tentativa de login varreria o banco. A UNICIDADE do e-mail não vem daqui: índice Mango não impede duplicata — quem garante é o _id do documento email:<endereço>.",
+    "definicao": {
+      "index": { "fields": ["tipo", "email"] },
+      "name": "idx_clientes_email",
+      "ddoc": "idx_clientes_email",
+      "type": "json"
+    }
+  },
+  {
+    "consulta": "Histórico do cliente logado, do mais novo para o mais antigo (RF06)",
+    "seletor": { "tipo": "pedido", "cliente_id": "cliente:<uuid>" },
+    "justificativa": "A tela Meus pedidos. O índice separa os pedidos de um cliente sem ler os dos outros, e criado_em no fim do índice entrega a ordem cronológica pronta. Datas em ISO 8601 UTC ordenam corretamente como texto.",
+    "definicao": {
+      "index": { "fields": ["tipo", "cliente_id", "criado_em"] },
+      "name": "idx_pedidos_cliente",
+      "ddoc": "idx_pedidos_cliente",
+      "type": "json"
+    }
+  }
+]

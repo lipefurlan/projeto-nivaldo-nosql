@@ -14,7 +14,7 @@
       <div>
         <p class="linha-nome">{{ linha.produto.nome }}</p>
         <p class="linha-detalhe">
-          Moagem {{ linha.moagem|lower }} · {{ linha.quantidade }} × {{ linha.produto.preco|brl }}
+          Moagem {{ linha.moagem|lower }} · {{ linha.quantidade }} × {{ linha.produto.preco_centavos|brl }}
         </p>
       </div>
       <p class="preco">{{ linha.subtotal|brl }}</p>
@@ -28,9 +28,10 @@
 </div>
 
 <p class="campo-ajuda">
-  Ao confirmar, o pedido é gravado e o estoque é baixado na mesma transação.
-  Se faltar estoque de qualquer café, nada é gravado e você volta ao carrinho
-  com a mensagem dizendo qual faltou.
+  Ao confirmar, o pedido é registrado e o estoque de cada café é reservado.
+  Se algum café acabar no meio do caminho, o que já tinha sido reservado volta
+  para o estoque, o pedido é cancelado e você volta ao carrinho com a mensagem
+  dizendo qual café faltou.
 </p>
 
 <form class="formulario" method="post" action="{{ url_for('checkout') }}">

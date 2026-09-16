@@ -13,10 +13,10 @@
       <li class="linha">
         <div>
           <p class="linha-nome">
-            <a href="{{ url_for('produto', produto_id=linha.produto.id) }}">{{ linha.produto.nome }}</a>
+            <a href="{{ url_for('produto', slug_produto=linha.produto['_id']|slug) }}">{{ linha.produto.nome }}</a>
           </p>
           <p class="linha-detalhe">
-            Moagem {{ linha.moagem|lower }} · {{ linha.quantidade }} × {{ linha.produto.preco|brl }}
+            Moagem {{ linha.moagem|lower }} · {{ linha.quantidade }} × {{ linha.produto.preco_centavos|brl }}
           </p>
 
           {% if linha.quantidade > linha.produto.estoque %}
@@ -31,7 +31,7 @@
 
           <form method="post" action="{{ url_for('remover_do_carrinho') }}">
             <input type="hidden" name="_csrf" value="{{ token_csrf() }}">
-            <input type="hidden" name="produto_id" value="{{ linha.produto.id }}">
+            <input type="hidden" name="produto_id" value="{{ linha.produto['_id'] }}">
             <input type="hidden" name="moagem" value="{{ linha.moagem }}">
             <button class="botao-texto" type="submit">Remover</button>
           </form>
