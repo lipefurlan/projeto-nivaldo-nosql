@@ -5,7 +5,7 @@ Projeto acadêmico da disciplina **Tratamento e Armazenamento da Informação** 
 ## Regras que valem para o projeto inteiro
 
 1. **Tudo em português** — documentos, campos, rotas, variáveis, mensagens, comentários, commits.  
-2. **Stack fechada.** Python, Flask, Jinja, requests, python-dotenv, pytest. Banco: Apache CouchDB 3.5 local (docker-compose) e IBM Cloudant em produção — mesma API HTTP. Deploy: Vercel. Nada além disso sem me perguntar antes (sem ORM, sem SDK do Cloudant, sem gunicorn).  
+2. **Stack fechada.** Python, Flask, Jinja, requests, python-dotenv, pytest. Banco: Apache CouchDB 3.5 — local pelo docker-compose e, em produção, a mesma imagem num container do Railway. Deploy: Vercel. Nada além disso sem me perguntar antes (sem ORM, sem SDK de CouchDB ou Cloudant, sem gunicorn).  
 3. **As regras vivem no banco também.** `couchdb/validacao.js` (a `validate_doc_update`, JavaScript ES5) é onde o CouchDB aplica as regras que no relacional eram `CHECK`. `validar_produto` e `validar_pedido` em `app.py` espelham as mesmas regras. Mudou uma regra: muda nos dois lugares e no teste.  
 4. **Comente decisões, não o óbvio.** Um comentário explicando por que a marca de reserva mora no documento do café vale mais que dez dizendo `# grava o pedido`.  
 5. **Nenhum segredo no código.** `COUCHDB_URL`, `COUCHDB_IAM_APIKEY` e `SECRET_KEY` sempre de variável de ambiente. `.env` no `.gitignore`, `.env.example` versionado. Credencial nunca aparece em log: o `banco.py` tira usuário e senha da URL.  
@@ -119,10 +119,11 @@ Minimalismo quente e editorial. Muito espaço em branco, blocos modulares, hiera
 
 ## Ambiente
 
-- **Local:** `docker compose up -d` (CouchDB 3.5, Fauxton em `http://127.0.0.1:5984/_utils/`) ou o próprio Cloudant pelo `.env`. Esta máquina **não tem Docker**.  
-- **Produção:** Vercel (Flask detectado pelo `app.py`, região `iad1`) + IBM Cloudant Lite (Washington DC). `VERCEL=1` liga o modo produção; sem `SECRET_KEY` ou `COUCHDB_URL` a loja não sobe.  
+- **Local:** `docker compose up -d` (CouchDB 3.5, Fauxton em `http://127.0.0.1:5984/_utils/`) ou o CouchDB do Railway pelo `.env`, com o usuário `admin`. Esta máquina **não tem Docker**.  
+- **Produção:** Vercel (Flask detectado pelo `app.py`, região `iad1`, plano Hobby) + CouchDB 3.5.2 no Railway (projeto `torra-terra-nosql`, serviço `couchdb`, uma réplica em US East, volume em `/opt/couchdb/data`, Fauxton em `https://couchdb-production-ed47.up.railway.app/_utils`). No ar em `https://projeto-nivaldo-nosql.vercel.app`. `VERCEL=1` liga o modo produção; sem `SECRET_KEY` ou `COUCHDB_URL` a loja responde 503 dizendo o nome do que falta — e variável nova no Vercel só vale depois de um deploy novo.  
+- **Usuários do banco:** a loja no Vercel entra com `torra_app`, único membro do `_security` do `torra_terra` (não grava design documents, não apaga o banco). O `admin` fica só no `.env` local, para `init-db`, `seed-db`, `reset-db` e `reconciliar`. O `reset-db` recria o banco e perde o `_security`: reaplique depois (`docs/deploy_vercel.md`, passo 2.3). Nunca cole essas URLs com senha em chat, commit ou print.  
 - O `.env` é carregado com caminho explícito: esta pasta mora dentro do projeto relacional, que tem outro `.env`.  
-- Cloudant Lite: 20 leituras/s, 10 escritas/s e 5 consultas globais/s — o `banco.py` repete no 429. Pela documentação da IBM, `_all_docs` e `_find` globais contam como **consulta global**, a cota mais apertada; leitura por `_id` e `_bulk_get` contam como leitura. Prefira ler pelo `_id` quando der.
+- **Nó único:** o conflito de `_rev` é sempre 409 e o `_find` enxerga a última gravação. As ressalvas de cluster (202, revisões em conflito, índice eventual) só voltam numa migração para o IBM Cloudant ou para um CouchDB em cluster — o `banco.py` já trata IAM e 429 para esse caso. Mesmo sem cota, prefira ler pelo `_id` quando der: cada ida ao banco é latência (20 ms de mediana em produção).
 
 Comandos: `flask --app app init-db` · `seed-db` · `reset-db` · `reconciliar`
 

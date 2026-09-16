@@ -4,7 +4,7 @@ A mesma suíte roda de dois jeitos:
 
 - contra um CouchDB DE VERDADE, quando a variável TEST_COUCHDB_URL está
   definida. É assim que ela roda no GitHub Actions, com o Apache CouchDB 3
-  num container, e é assim que se testa contra o Cloudant;
+  num container, e é assim que se testa contra qualquer outro CouchDB;
 - contra o dublê em memória (tests/couchdb_falso.py), quando não está. É o
   que permite rodar `pytest` numa máquina sem Docker.
 

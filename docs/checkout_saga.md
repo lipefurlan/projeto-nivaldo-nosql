@@ -209,11 +209,12 @@ chamado sem `doc=` e faz `GET` antes de decidir.
 
 - Se o `PUT` da fase 2 chegar ao banco depois de a compensação procurar o
   pedido, sobra um `PENDENTE` sem reserva, "processando" até a reconciliação.
-- O Cloudant é um cluster: duas gravações quase simultâneas no mesmo café podem
-  ser aceitas em cópias diferentes (201 numa, 202 na outra) e virar revisões em
-  conflito, sem 409 — e as duas compras seguem. O `banco.py` só registra o 202
-  no log, e a loja não lê `_conflicts`. O dublê e o CouchDB do CI, com uma cópia
-  só, não reproduzem o caso.
+- Num cluster — o Cloudant, ou um CouchDB em cluster —, duas gravações quase
+  simultâneas no mesmo café podem ser aceitas em cópias diferentes (201 numa,
+  202 na outra) e virar revisões em conflito, sem 409 — e as duas compras
+  seguem. O `banco.py` só registra o 202 no log, e a loja não lê `_conflicts`.
+  A produção, no Railway, é um nó único, como o dublê e o CouchDB do CI: nenhum
+  deles tem o caso, que volta numa migração para cluster.
 
 ## 7. Idempotência
 

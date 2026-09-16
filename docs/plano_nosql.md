@@ -10,7 +10,10 @@
 > 3. **Sem Docker nesta máquina:** os testes rodam contra um dublê em memória
 >    localmente e contra o Apache CouchDB 3.5 de verdade no GitHub Actions. O
 >    `docker-compose.yml` continua no projeto para quem tem Docker.
-> 4. **Deploy no Vercel + IBM Cloudant**, saindo do Railway por custo.
+> 4. **Deploy no Vercel, com o CouchDB num container do Railway.** O site saiu
+>    do Railway por custo. O IBM Cloudant foi o primeiro plano para o banco e
+>    ficou de fora porque a conta exige cartão de crédito; o CouchDB entrou no
+>    Railway sem mudar nenhuma linha de código.
 >
 > A seção 2.2 virou o centro do trabalho: a saga do checkout, com marcas de
 > reserva e compensação, está em `docs/checkout_saga.md`. As justificativas

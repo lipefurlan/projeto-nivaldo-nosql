@@ -18,14 +18,14 @@ afirmação aponta para o arquivo onde pode ser conferida — os da tag com
 | Unicidade | `email VARCHAR(160) NOT NULL UNIQUE` e `IntegrityError` | `_id` do documento-chave `email:<endereço>` e HTTP 409 |
 | Concorrência | Pessimista: `SELECT ... FOR UPDATE` | Otimista: `_rev`, 409 e nova tentativa |
 | Atomicidade | Transação: `COMMIT` / `ROLLBACK` sobre quantas tabelas forem | Um documento por gravação; entre documentos, saga com compensação e reconciliação |
-| Leitura após gravar | Depois do `COMMIT`, toda consulta enxerga o dado | Consulta por índice no Cloudant pode chegar atrasada; *Meus pedidos* busca o último pedido pelo `_id` |
+| Leitura após gravar | Depois do `COMMIT`, toda consulta enxerga o dado | No nó único de produção, a consulta por índice já enxerga a gravação; num cluster, como o Cloudant, poderia chegar atrasada, e *Meus pedidos* já busca o último pedido pelo `_id` |
 | Dinheiro | `NUMERIC(10,2)` e `Decimal` | Centavos inteiros (`preco_centavos: 14800`); `R$` só na tela |
 | Carrinho | Sessão do Flask (cookie assinado), `produto_id` inteiro | Sessão do Flask, `produto_id` como `"produto:chapada-geisha"` |
-| Administração | `psql` / pgAdmin | Fauxton local (`/_utils/`) e painel do Cloudant, baseado no Fauxton |
-| Setup local | PostgreSQL instalado e `psql -U postgres -f SQL/usuario_app.sql` | `docker compose up -d` (CouchDB 3.5), ou o Cloudant pelo `.env` |
+| Administração | `psql` / pgAdmin | Fauxton (`/_utils/`), no CouchDB local e no do Railway |
+| Setup local | PostgreSQL instalado e `psql -U postgres -f SQL/usuario_app.sql` | `docker compose up -d` (CouchDB 3.5), ou o CouchDB do Railway pelo `.env` |
 | Criar a estrutura | `flask init-db` roda o `schema.sql` | `flask init-db` cria o banco, grava `_design/regras` e os índices; idempotente |
-| Hospedagem | Railway: aplicação e PostgreSQL no mesmo projeto, gunicorn pelo `Procfile` | Vercel (função Python) e IBM Cloudant Lite, os dois no plano gratuito |
-| Limite de vazão | Não se aplica | O Cloudant Lite responde 429; `banco.py` espera e repete |
+| Hospedagem | Railway: aplicação e PostgreSQL no mesmo projeto, gunicorn pelo `Procfile` | Vercel (função Python, plano Hobby, gratuito) e CouchDB 3.5 num container do Railway, com volume; a loja entra com um usuário restrito, como o `torra_app` do relacional |
+| Limite de vazão | Não se aplica | Não se aplica no Railway. O `banco.py` já espera e repete o 429, para uma migração ao Cloudant Lite |
 | Testes | pytest contra PostgreSQL de verdade, num banco `_teste` | pytest contra CouchDB 3.5 de verdade no GitHub Actions, e contra um dublê em memória (`tests/couchdb_falso.py`) sem Docker |
 | Acesso ao banco | Flask-SQLAlchemy, SQLAlchemy e o driver psycopg 3 | HTTP puro com `requests`, centralizado em `banco.py` |
 
@@ -183,7 +183,8 @@ caso em [`checkout_saga.md`](checkout_saga.md).
   as regiões por faixa do índice primário (`listar_por_prefixo("categoria:")`).
 - **Enxergar o banco.** Cada operação é um verbo HTTP sobre uma URL: dá para
   repetir no `curl` e no Fauxton, e o mesmo `banco.py` fala com o CouchDB
-  local e com o Cloudant.
+  local e com o do Railway. Trocar o banco de produção — era para ser o
+  Cloudant — foi trocar uma URL.
 
 ### Ficou mais difícil no CouchDB
 
@@ -202,15 +203,20 @@ caso em [`checkout_saga.md`](checkout_saga.md).
 - **A consulta depende do índice.** O Mango só ordena por campos do índice, na
   ordem do índice: `nome` e `criado_em` entram nos índices por isso, e as
   datas são texto ISO 8601 em UTC para ordenarem certo (`agora_iso`).
-- **Consistência eventual.** No Cloudant, a consulta por índice pode não
-  enxergar a gravação recém-feita; *Meus pedidos* guarda o último pedido na
-  sessão e o lê pelo `_id` (`test_meus_pedidos_mostra_o_pedido_recem_feito_mesmo_com_indice_atrasado`).
-- **O cluster.** No Cloudant, duas gravações quase simultâneas no mesmo
+- **Consistência eventual, num cluster.** Num cluster, como o Cloudant, a
+  consulta por índice pode não enxergar a gravação recém-feita; *Meus pedidos*
+  guarda o último pedido na sessão e o lê pelo `_id`
+  (`test_meus_pedidos_mostra_o_pedido_recem_feito_mesmo_com_indice_atrasado`).
+  A produção, num nó único, não tem o atraso; a proteção fica para uma migração.
+- **O cluster.** Num cluster, duas gravações quase simultâneas no mesmo
   documento podem ser aceitas em cópias diferentes (201 e 202) e virar revisões
   em conflito, sem 409. O `banco.py` só registra o 202 no log, e a loja não lê
-  `_conflicts` (`checkout_saga.md`, seção 6).
-- **Operação.** A reconciliação precisa rodar, e hoje roda à mão. O plano
-  gratuito limita a vazão, e o 429 precisou de tratamento.
+  `_conflicts` (`checkout_saga.md`, seção 6). A produção atual, nó único, não
+  tem o caso.
+- **Operação.** A reconciliação precisa rodar, e hoje roda à mão. O banco de
+  produção é um container só, sem réplica, e o backup é uma replicação feita à
+  mão. O tratamento do 429, escrito para o Cloudant Lite, continua no
+  `banco.py`, mas o Railway não tem cota.
 - **Testar a regra do banco.** Os 15 casos da `validate_doc_update` só rodam
   com CouchDB de verdade; sem `TEST_COUCHDB_URL`, o dublê os pula.
 

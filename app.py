@@ -5,7 +5,7 @@ FACAMP · Tratamento e Armazenamento da Informação
 Professor: Nivaldo T. Marcusso
 
 É a mesma loja do projeto relacional (tag v1-relacional no Git), agora sobre
-o Apache CouchDB — ou o IBM Cloudant, que fala a mesma API. O que mudou de
+o Apache CouchDB — em produção, num container do Railway. O que mudou de
 lugar na troca:
 
     tabelas + FOREIGN KEY     ->  documentos JSON com `tipo`, embed ou referência
@@ -1094,7 +1094,7 @@ def registrar_rotas(app: Flask) -> None:
     def injetar_contexto():
         # O nome vem da sessão, gravado no login. No relacional esta função
         # buscava o cliente no banco a cada página; aqui isso seria uma ida
-        # ao Cloudant por requisição só para escrever "Sair" no menu.
+        # ao banco por página só para escrever "Sair" no menu.
         return {
             "cliente_logado": session.get("cliente_nome") if session.get("cliente_id") else None,
             "itens_no_carrinho": sum(linha["quantidade"] for linha in ler_carrinho()),
@@ -1361,11 +1361,13 @@ def registrar_rotas(app: Flask) -> None:
         b = banco()
         pedidos = b.buscar(consulta_pedidos_do_cliente(session["cliente_id"]))
 
-        # Ler a própria escrita. O Cloudant é um cluster eventualmente
-        # consistente: a consulta ao índice pode ser respondida por uma cópia
-        # que ainda não recebeu a gravação, e o pedido recém-feito sumiria da
-        # tela por um instante. O GET pelo _id lê por quórum e vai direto ao
-        # documento, então o último pedido entra garantido por fora do índice.
+        # Ler a própria escrita. Num cluster, como o Cloudant, a consulta ao
+        # índice pode ser respondida por uma cópia que ainda não recebeu a
+        # gravação, e o pedido recém-feito sumiria da tela por um instante. O
+        # GET pelo _id lê por quórum e vai direto ao documento, então o último
+        # pedido entra garantido por fora do índice. No nó único de produção o
+        # índice já traz o pedido e este GET nem acontece: fica para uma
+        # migração não quebrar a tela.
         ultimo = session.get("ultimo_pedido")
         if ultimo and all(p["_id"] != ultimo for p in pedidos):
             doc = b.obter_ou_none(ultimo)

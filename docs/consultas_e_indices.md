@@ -194,14 +194,15 @@ Para repetir à mão, grave o corpo de uma consulta em `consulta.json` e rode (n
 curl -s -X POST http://admin:admin@127.0.0.1:5984/torra_terra/_explain -H "Content-Type: application/json" -d "@consulta.json"
 ```
 
-No Cloudant, o endereço é a URL da credencial. No Fauxton (`http://127.0.0.1:5984/_utils/`), a tela
-**Run A Query with Mango** do banco tem o botão **Explain**, que mostra o mesmo plano.
+Em produção, o endereço é o do CouchDB no Railway, com o `admin`. No Fauxton
+(`http://127.0.0.1:5984/_utils/`, ou `/_utils` no Railway), a tela **Run A Query with Mango** do
+banco tem o botão **Explain**, que mostra o mesmo plano.
 
 ## 5. Consistência de leitura
 
 A pergunta: logo depois de uma gravação, cada forma de acesso já enxerga o que foi gravado?
 
-| Forma de acesso | Onde a loja usa | CouchDB de nó único (docker-compose, CI) | Cluster (Cloudant) |
+| Forma de acesso | Onde a loja usa | CouchDB de nó único (docker-compose, CI e produção no Railway) | Cluster (Cloudant) |
 |---|---|---|---|
 | Lookup por `_id` | café, região, compra repetida, último pedido | imediato | lê por quórum: a maioria das cópias, que se cruza com a maioria que confirmou a gravação |
 | `_all_docs` com `keys` | carrinho, checkout | imediato | cada chave é aberta como um lookup, com o mesmo quórum |
@@ -215,17 +216,26 @@ eventualmente consistente. O atraso é característica do cluster, não do Couch
 Por isso **Meus pedidos** não confia só no índice (rota `meus_pedidos`, em `app.py`). O checkout
 guarda o `_id` do pedido em `session["ultimo_pedido"]`; se a consulta a `idx_pedidos_cliente` não o
 trouxer, a rota lê o pedido pelo `_id` e o põe no topo, depois de conferir que ele é do cliente
-logado. No CouchDB de nó único esse GET não faz falta; no Cloudant, cobre a janela de atraso.
+logado. No CouchDB de nó único — o de produção inclusive — esse GET não faz falta, e nem chega a
+acontecer: o índice já traz o pedido. Num cluster, como o Cloudant, ele cobriria a janela de atraso;
+ficou no código para uma migração não quebrar a tela.
 
 As outras leituras toleram atraso. O checkout grava com `_rev`: um café lido velho esbarra no 409 e
 é relido. A reconciliação relê cada documento pelo `_id` antes de gravar (`banco.atualizar`) e
 decide pelo estado do pedido, lido também pelo `_id`. As categorias só mudam no `seed-db`. E o login
 logo depois do cadastro não passa pelo índice: o cadastro já abre a sessão.
 
-## 6. Custo no Cloudant Lite
+## 6. Custo por rota: idas ao banco e cota do Cloudant
 
-O plano Lite limita a vazão por segundo, por classe de requisição. A classificação é a da
-documentação da IBM:
+Em produção, o banco é o CouchDB do Railway, que cobra pelos recursos do container, não por
+requisição, e não limita a vazão. Lá, o custo de cada ida ao banco é **tempo**: 20 ms de mediana,
+medidos em `/saude` com a função aquecida — uma leitura simples; `_find` e `_bulk_docs` podem levar
+mais. Um checkout faz oito idas, e numa compra de teste em produção, medida do Brasil, o
+`POST /checkout` inteiro levou 556 ms.
+
+A contagem por rota abaixo vale para os dois bancos — mais idas, mais espera. As colunas de classe
+são as do **Cloudant Lite**, que limita a vazão por segundo, por classe de requisição, segundo a
+documentação da IBM. Elas passariam a valer numa migração:
 
 | Classe | Limite | O que conta | Onde a loja usa |
 |---|---|---|---|
@@ -264,8 +274,8 @@ O `GET /saude` faz um `GET /torra_terra`, que não aparece entre os exemplos das
 8. `POST _bulk_docs` com k cafés — fase 5, tira as marcas.
 
 São oito porque a rota lê o carrinho antes da saga e a limpeza relê os cafés (`_limpar_marcas` não
-reaproveita a leitura da fase 3). Com dois cafés: 6 escritas, 60% do limite de um segundo, e 3
-consultas globais — a quarta vem no redirecionamento para Meus pedidos. Cada rodada de conflito na
+reaproveita a leitura da fase 3). Com dois cafés, no Cloudant Lite: 6 escritas, 60% do limite de
+um segundo, e 3 consultas globais — a quarta vem no redirecionamento para Meus pedidos. Cada rodada de conflito na
 fase 3 soma um `_all_docs` e um `_bulk_docs`.
 
 **Quando passa do limite.** O Cloudant responde HTTP 429 antes de processar, então repetir é seguro
@@ -274,7 +284,8 @@ ele vem (no máximo 5 s) ou uma espera sorteada que dobra a cada vez (até 0,1 s
 429 persistir, vira `BancoIndisponivel`: a página "Voltamos em instantes", com 503, ou, nas fases 3
 e 4 do checkout, a compensação. `test_limite_de_vazao_429_e_repetido` prova a repetição.
 
-Na prática, a página inicial gasta 2 das 5 consultas globais por segundo — três visitas no mesmo
-segundo já esbarram no limite — e uma compra completa gasta 4. Opções, **não implementadas**: um
-`_bulk_get` em `obter_varios` levaria carrinho e checkout para a classe de leitura (20/s), e a fase
-1 poderia reaproveitar os cafés que a rota acabou de ler.
+No Cloudant Lite, a página inicial gastaria 2 das 5 consultas globais por segundo — três visitas
+no mesmo segundo já esbarrariam no limite — e uma compra completa gastaria 4. Opções, **não
+implementadas**: um `_bulk_get` em `obter_varios` levaria carrinho e checkout para a classe de
+leitura (20/s), e a fase 1 poderia reaproveitar os cafés que a rota acabou de ler — o que, no
+Railway, pouparia uma ida ao banco, uns 20 ms.

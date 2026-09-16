@@ -11,8 +11,9 @@ próprio HTTP, e cada operação é um verbo sobre uma URL.
     POST   /torra_terra/_index                    cria índice Mango
     POST   /torra_terra/_bulk_docs                grava vários documentos
 
-O mesmo código fala com o CouchDB do docker-compose e com o IBM Cloudant,
-que implementa a mesma API.
+O mesmo código fala com o CouchDB do docker-compose e com o do Railway, em
+produção. Foi escrito para falar também com o IBM Cloudant, que implementa a
+mesma API: daí o token IAM e a repetição no 429, mais abaixo.
 """
 
 import copy

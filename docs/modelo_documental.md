@@ -251,7 +251,7 @@ em `app.py`, que confere antes para dar mensagem clara.
 | `itens_pedido.produto_id NOT NULL` + FK | começa com `produto:` | Fase 1 do checkout recusa café inexistente ou inativo |
 | `quantidade CHECK (> 0)` | inteiro `> 0` | Rota exige 1 ou mais; `validar_pedido` |
 | `UNIQUE (pedido_id, produto_id, moagem)` | o par (`produto_id`, `moagem`) não se repete no array | O carrinho soma na mesma linha; `validar_pedido` |
-| `VARCHAR(n)` | sem equivalente | Nenhum limite; o teto é o documento (1 MB no Cloudant) |
+| `VARCHAR(n)` | sem equivalente | Nenhum limite; o teto é o documento (8 MB no CouchDB 3.5, pelo `max_document_size` padrão; 1 MB no Cloudant) |
 
 **Regras que o relacional não tinha.** Itens de pedido gravado não mudam — a função compara
 `produto_id`, `moagem`, `quantidade` e `preco_unitario_centavos`, não o `nome`. O cliente do pedido
@@ -271,11 +271,12 @@ um pedido de `cliente:nao-existe` passa, e apagar cliente com pedidos também. O
 5. A reconciliação limpa as órfãs que a loja pode deixar: reserva de pedido inexistente ou
    cancelado, e `email:` sem cliente.
 
-**Um limite do cluster.** Num nó único, o CouchDB resolve gravações concorrentes no mesmo documento
-com 409. O Cloudant guarda três cópias: duas gravações quase simultâneas podem ser aceitas em cópias
-diferentes — uma recebe 201, a outra 202 — e o documento fica com duas revisões em conflito, só uma
-vencedora. Isso alcança a chave `email:` e as baixas de estoque; o `banco.py` trata 202 como
-sucesso, e o projeto não lê `_conflicts`.
+**Um limite do cluster.** Num nó único — como o CouchDB de produção, no Railway —, gravações
+concorrentes no mesmo documento se resolvem com 409. Num cluster, como o Cloudant, que guarda três
+cópias, duas gravações quase simultâneas poderiam ser aceitas em cópias diferentes — uma recebe 201,
+a outra 202 — e o documento ficaria com duas revisões em conflito, só uma vencedora. Isso alcançaria
+a chave `email:` e as baixas de estoque; o `banco.py` trata 202 como sucesso, e o projeto não lê
+`_conflicts`. O limite não vale para a produção atual e volta numa migração para cluster.
 
 ## 6. Documentos limitados
 
@@ -286,7 +287,8 @@ sucesso, e o projeto não lê `_conflicts`.
 | `produto.reservas` | uma marca por checkout em andamento | Sai na fase 5, na compensação ou na reconciliação — que é manual: a marca de uma falha espera alguém rodar o comando |
 
 **O histórico de pedidos não fica dentro do cliente.** Cresceria a cada compra, para sempre, e o
-Cloudant recusa documento acima de 1 MB. Cada checkout regravaria o cliente, que entraria na saga:
+CouchDB recusa documento acima do limite (8 MB por padrão, 1 MB no Cloudant). Cada checkout
+regravaria o cliente, que entraria na saga:
 duas compras simultâneas do mesmo cliente disputariam o `_rev`. E o login, que lê o cliente
 inteiro, carregaria todo o histórico. Em vez disso, o pedido guarda `cliente_id`, e
 `idx_pedidos_cliente` responde "pedidos deste cliente", com limite de 50.
@@ -317,4 +319,5 @@ fica até um `_purge`; no Cloudant, expurgo só por pedido de emergência à IBM
 cerca de 90 dias depois. Isso pesa no `email:<endereço>`: o e-mail vai na URL de cada gravação e nos
 logs de acesso, sobrevive no túmulo, e a IBM recomenda não usar dado pessoal no `_id`. Correção
 proposta, não implementada: chave com HMAC do e-mail e segredo em variável de ambiente. O pedido já
-guarda só `cliente_id`. Arquivar custa: cada exclusão é uma escrita, e o Lite aceita 10 por segundo.
+guarda só `cliente_id`. Arquivar custa: cada exclusão é uma escrita — uma ida ao banco no Railway,
+e uma das 10 por segundo que o Cloudant Lite aceitaria.

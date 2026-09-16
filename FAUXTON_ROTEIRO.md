@@ -16,14 +16,17 @@ flask --app app init-db
 flask --app app seed-db
 ```
 
-**IBM Cloudant:** na instância, **Launch Dashboard** abre um painel baseado no
-Fauxton. Os passos 1 a 8 valem igual, às vezes com outro nome de menu; 9 e 10
-usam a loja e o terminal; 11 exige o CouchDB local.
+**CouchDB no Railway (produção):** o Fauxton fica em
+`https://couchdb-production-ed47.up.railway.app/_utils`, com login do `admin`.
+É o mesmo Fauxton do CouchDB local, então os passos 1 a 8 valem igual; 9 e 10
+usam a loja e o terminal; 11 copia o banco do Railway para o CouchDB local.
 
-**Cuidados:** nenhum print mostra URL com usuário e senha, *Service
-credentials*, API key ou `.env`. Os passos 3, 8, 9 e 10 gravam no banco: no
-Cloudant, use um banco só de evidências (`COUCHDB_DATABASE=torra_terra_evidencias`,
-mais `init-db` e `seed-db`). O `seed-db` devolve os cafés ao estoque inicial.
+**Cuidados:** nenhum print mostra URL com usuário e senha, a tela de login com
+a senha digitada, as variáveis do Railway ou do Vercel, ou o `.env`. Os passos
+3, 8, 9 e 10 gravam no banco: no Railway, use um banco só de evidências
+(`COUCHDB_DATABASE=torra_terra_evidencias`, mais `init-db` e `seed-db`), para
+não mexer no estoque da loja que está no ar. O `seed-db` devolve os cafés ao
+estoque inicial.
 
 ## 1. Os tipos pelo prefixo do `_id`
 
@@ -146,22 +149,24 @@ finalizar_pedido(cliente["_id"], [
   `status` para `CRIADO` no Fauxton: *Save failed: pedido cancelado não volta a valer*.
 - **Print:** o pedido com o `historico` e a tela Meus pedidos.
 
-## 11. Replicação: backup do Cloudant no CouchDB local
+## 11. Replicação: backup do Railway no CouchDB local
 
 - **Fazer:** no Fauxton **local**, **Replication** → **New Replication**.
-  Origem *Remote database*: a URL do Cloudant **sem** usuário e senha
-  (`https://<host>/torra_terra`), autenticação *Username and password* com os
-  dados da credencial. Destino *New local database*, `torra_terra_backup`; tipo
-  *One time*; **Start Replication** (se pedir, a senha do `admin` local).
+  Origem *Remote database*: a URL do Railway **sem** usuário e senha
+  (`https://couchdb-production-ed47.up.railway.app/torra_terra`), autenticação
+  *Username and password* com o `admin` do Railway. Destino *New local
+  database*, `torra_terra_backup`; tipo *One time*; **Start Replication** (se
+  pedir, a senha do `admin` local).
 - **Observar:** a replicação concluída em **Replicator DB Activity**; em
-  **Databases**, a mesma contagem de documentos do Cloudant, e cada documento
+  **Databases**, a mesma contagem de documentos do Railway, e cada documento
   com o **mesmo `_rev`** — replicar copia revisões, não só conteúdo. Para testar
   a restauração, rode a loja com `COUCHDB_DATABASE=torra_terra_backup`.
 - **Print:** a replicação concluída e as duas contagens, com a URL cortada.
 
 O documento em `_replicator` guarda a credencial em base64, reversível: nada de
-print dele, e apague-o ao terminar. Sem Docker, replique no painel do Cloudant
-para um banco novo — prova o mecanismo, mas não é backup fora do provedor.
+print dele, e apague-o ao terminar. Sem Docker, replique no próprio Fauxton do
+Railway para um banco novo — prova o mecanismo, mas não é backup: a cópia fica
+no mesmo servidor e no mesmo volume.
 
 ## Os mesmos testes pelo terminal
 

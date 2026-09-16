@@ -85,9 +85,12 @@ e qual índice criar. Cada decisão da última coluna nasceu de uma linha da tab
 Resultado: **quatro índices secundários**, um por consulta frequente que filtra
 ou ordena (C1, C2, C6, C9), cada um justificado em
 [`couchdb/indices.json`](../couchdb/indices.json) e conferido pelo `_explain` em
-`test_indices_atendem_as_consultas`. No Cloudant Lite, segundo a IBM, GET pelo
-`_id` conta como leitura (20/s), mas `_find` **e** `_all_docs` contam como
-consulta global (5/s): uma visita ao catálogo gasta duas, C1 ou C2 mais C3.
+`test_indices_atendem_as_consultas`. Em produção, no CouchDB do Railway, não
+há cota por requisição, mas cada ida ao banco é espera (20 ms de mediana, medidos
+em `/saude`): uma visita ao catálogo faz duas, C1 ou C2 mais C3. Numa migração
+para o Cloudant Lite, a conta mudaria de natureza: segundo a IBM, GET pelo `_id`
+conta como leitura (20/s), mas `_find` **e** `_all_docs` contam como consulta
+global (5/s).
 
 ---
 
@@ -179,25 +182,25 @@ cancelado voltar a valer. Testes em `tests/test_checkout.py`, `test_rotas.py` e
 | **RNF01** | Integridade | As regras valem **no banco**: a `validate_doc_update` recusa com HTTP 403 o documento inválido, venha da loja, do Fauxton, de um `curl` ou de uma replicação. A aplicação confere as mesmas regras antes, só para dar mensagem clara | `couchdb/validacao.js`; `tests/test_validacao.py` — camada da aplicação sempre, camada do banco (`couchdb_real`) no GitHub Actions; [roteiro do Fauxton](../FAUXTON_ROTEIRO.md), passo 7 |
 | **RNF02** | Integridade | Nenhuma compra fica pela metade valendo: saga com compensação idempotente e reconciliação | `tests/test_checkout.py`; roteiro do Fauxton, passos 9 e 10 |
 | **RNF03** | Concorrência | Duas gravações no mesmo documento nunca se sobrescrevem às cegas: `_rev`, 409 e releitura | `test_gravar_com_rev_velho_da_409`, `test_conflito_409_e_resolvido_relendo_o_documento`; roteiro do Fauxton, passo 8 |
-| **RNF04** | Consistência | A consistência esperada de cada operação está registrada (tabela abaixo), e a tela afetada pela consistência eventual a contorna | Rota `meus_pedidos` em `app.py`. Sem teste do atraso do índice: o dublê e o CouchDB local respondem já atualizados |
-| **RNF05** | Segurança | Senha só como hash scrypt, e o banco recusa `senha` em texto puro. Credenciais e `SECRET_KEY` só em variável de ambiente; em produção a loja não sobe sem elas; usuário e senha saem da URL antes de qualquer log | `test_senha_nunca_e_gravada_em_texto_puro`, `test_banco_recusa_senha_em_texto_puro`, `test_erro_de_conexao_nao_vaza_a_senha`; `.env` no `.gitignore` |
+| **RNF04** | Consistência | A consistência esperada de cada operação está registrada (tabela abaixo), e a tela afetada pela consistência eventual a contorna | Rota `meus_pedidos` em `app.py`. Sem teste do atraso do índice: o dublê, o CouchDB local e o de produção, todos de nó único, respondem já atualizados |
+| **RNF05** | Segurança | Senha só como hash scrypt, e o banco recusa `senha` em texto puro. Credenciais e `SECRET_KEY` só em variável de ambiente; em produção, sem elas, a loja responde 503 dizendo o nome do que falta, nunca o valor; usuário e senha saem da URL antes de qualquer log. A loja entra no banco com o usuário restrito `torra_app`, que não grava design documents nem apaga o banco | `test_senha_nunca_e_gravada_em_texto_puro`, `test_banco_recusa_senha_em_texto_puro`, `test_erro_de_conexao_nao_vaza_a_senha`, `test_producao_sem_segredos_responde_503_dizendo_o_que_falta`; `.env` no `.gitignore`; permissões conferidas contra o Railway ([`deploy_vercel.md`](deploy_vercel.md), passo 2.3) |
 | **RNF06** | Segurança | Proteções web do relacional mantidas: token CSRF, CSP com `script-src 'none'`, `X-Frame-Options`, HSTS atrás do proxy, cookie `HttpOnly` e `SameSite=Lax`, página logada fora do cache, sem *open redirect* | `tests/test_seguranca.py` |
 | **RNF07** | Desempenho | Cada consulta frequente tem índice próprio, confirmado pelo CouchDB; o que dá para ler pelo `_id` não usa `_find`; o catálogo traz só os campos do cartão | `couchdb/indices.json`; `test_indices_atendem_as_consultas`, `test_consulta_do_catalogo_traz_so_os_campos_do_cartao`; roteiro do Fauxton, passos 4 e 5 |
-| **RNF08** | Disponibilidade | Banco fora do ar vira página 503, não erro 500. Leitura é repetida em falha de rede ou 5xx; o 429 do Cloudant é repetido com espera, até em escrita; timeout de 3 s para conectar e 10 s para ler | `test_banco_fora_do_ar_mostra_pagina_503`, `test_limite_de_vazao_429_e_repetido` |
-| **RNF09** | Observabilidade | `/saude` devolve JSON com o estado do banco e a latência (200 ou 503). O log registra banco indisponível, compensação que não concluiu, marca deixada para a reconciliação e consulta que rodou sem índice | `test_saude_informa_o_estado_do_banco`; logs do Vercel e Monitoring do Cloudant ([`deploy_vercel.md`](deploy_vercel.md)) |
-| **RNF10** | Portabilidade | O mesmo código fala com o CouchDB 3.5 local (`docker-compose.yml`) e com o IBM Cloudant; só muda o `COUCHDB_URL`. A suíte roda sem Docker (dublê em memória) e contra CouchDB de verdade | `.github/workflows/testes.yml`: um job contra o CouchDB 3.5, outro com o dublê |
-| **RNF11** | Recuperação | Backup por replicação do Cloudant para um CouchDB local; restauração por replicação para um banco novo, conferindo as contagens. Compra interrompida é terminada pela reconciliação | Roteiro do Fauxton, passo 11; `deploy_vercel.md`, seção Operação; testes `test_reconciliacao_*` |
+| **RNF08** | Disponibilidade | Banco fora do ar vira página 503, não erro 500. Leitura é repetida em falha de rede ou 5xx; o 429 de limite de vazão, como o do Cloudant, é repetido com espera, até em escrita; timeout de 3 s para conectar e 10 s para ler | `test_banco_fora_do_ar_mostra_pagina_503`, `test_limite_de_vazao_429_e_repetido` |
+| **RNF09** | Observabilidade | `/saude` devolve JSON com o estado do banco e a latência (200 ou 503). O log registra banco indisponível, compensação que não concluiu, marca deixada para a reconciliação e consulta que rodou sem índice | `test_saude_informa_o_estado_do_banco`; logs do Vercel; `railway logs` e `railway metrics` do banco ([`deploy_vercel.md`](deploy_vercel.md)) |
+| **RNF10** | Portabilidade | O mesmo código fala com o CouchDB 3.5 local (`docker-compose.yml`) e com o CouchDB do Railway; só muda o `COUCHDB_URL`. Trocar o banco de produção do Cloudant, que era o plano, pelo Railway não mudou nenhuma linha. O suporte ao Cloudant (token IAM, 429) está no código, mas não foi testado contra uma instância real. A suíte roda sem Docker (dublê em memória) e contra CouchDB de verdade | `.github/workflows/testes.yml`: um job contra o CouchDB 3.5, outro com o dublê; decisão N02 |
+| **RNF11** | Recuperação | Backup por replicação do CouchDB do Railway para um CouchDB local; restauração por replicação para um banco novo, conferindo as contagens. Compra interrompida é terminada pela reconciliação | Roteiro do Fauxton, passo 11; `deploy_vercel.md`, seção Operação; testes `test_reconciliacao_*` |
 | **RNF12** | Usabilidade | Interface mobile-first, contraste mínimo AA, `<label>` em todo campo | Abrir no celular |
 
 ### Consistência esperada por operação (slide 9, dica 5)
 
 | Operação | Consistência esperada | Onde isso importa |
 |---|---|---|
-| Ler um documento pelo `_id` (GET) | Forte: devolve a última versão confirmada (no Cloudant, lida por quórum) | Detalhe do café, releitura do pedido na compensação, último pedido em Meus pedidos |
+| Ler um documento pelo `_id` (GET) | Forte: devolve a última versão confirmada (num cluster, como o Cloudant, lida por quórum) | Detalhe do café, releitura do pedido na compensação, último pedido em Meus pedidos |
 | Gravar um documento | Forte **por documento**: grava sobre o `_rev` lido ou recebe 409, nunca sobrescreve às cegas | Reserva, cadastro, confirmação: mesmo que a leitura anterior esteja velha, a gravação não passa |
 | Gravar um lote (`_bulk_docs`) | Por documento: cada um entra ou volta com erro, independente dos outros | É por isso que a saga confere o resultado de cada café |
 | A compra inteira | Da saga, não do banco: por um instante há pedido `PENDENTE` com estoque reservado; ao fim, ou `CRIADO` com toda a baixa, ou `CANCELADO` sem nenhuma | RF05 |
-| Consulta Mango (`_find`) | No CouchDB local, o índice é atualizado antes de responder. No Cloudant, que é um cluster, é **eventual**: a consulta pode ser respondida por uma cópia que ainda não recebeu a gravação | Meus pedidos lê o último pedido também pelo `_id`; o cadastro já deixa o cliente logado, sem depender do índice do login |
+| Consulta Mango (`_find`) | Num nó único — o CouchDB local e o de produção, no Railway — o índice é atualizado antes de responder. Num cluster, como o Cloudant, seria **eventual**: a consulta poderia ser respondida por uma cópia que ainda não recebeu a gravação | Meus pedidos lê o último pedido também pelo `_id`, proteção que só faz diferença num cluster; o cadastro já deixa o cliente logado, sem depender do índice do login |
 | Estoque mostrado no catálogo e no carrinho | Informativa: pode estar defasada no instante da compra | Quem decide é a reserva, gravada sobre o `_rev` |
 
 ---
@@ -206,7 +209,7 @@ cancelado voltar a valer. Testes em `tests/test_checkout.py`, `test_rotas.py` e
 
 **MVP — entregue:** RF01 a RF06, com o **checkout como saga**; `init-db` e
 `seed-db`; testes com dublê e com CouchDB de verdade; roteiro do Fauxton; deploy
-no Vercel com Cloudant.
+no Vercel, com o CouchDB no Railway.
 
 **Extensão — os desafios do slide 51:**
 
@@ -273,8 +276,8 @@ está gravado no banco, não pelo que a função supõe.
 - **Sem área administrativa nem relatórios.** Cafés e estoque vêm do `seed-db`; mudar exige o Fauxton ou a API, e aí vale a `validate_doc_update`.
 - **Carrinho na sessão.** O carrinho é processo, não entidade: some ao trocar de dispositivo. O cookie é assinado, não cifrado — o cliente lê, mas não altera, o conteúdo; por isso o preço não vai nele.
 - **Reconciliação manual.** `flask --app app reconciliar` não roda sozinha: uma compra interrompida fica `PENDENTE`, com o estoque reservado, até alguém rodar o comando.
-- **Limites do Cloudant Lite.** 1 GB; 20 leituras, 10 escritas e 5 consultas globais por segundo; uma instância Lite por conta. Uma compra, contando a volta para Meus pedidos, faz quatro consultas globais e 2k + 2 gravações, sendo k o número de cafés diferentes no carrinho — o `_bulk_docs` conta uma gravação por documento. Acima do limite vem 429: o `banco.py` espera e repete, e se não der a loja mostra a página de indisponível.
+- **Banco em nó único.** O CouchDB de produção é um container só, no Railway, sem réplica: se ele cair, a loja mostra a página de indisponível até ele voltar, e o backup é uma replicação feita à mão. Numa migração para o Cloudant Lite entrariam os limites de vazão — 20 leituras, 10 escritas e 5 consultas globais por segundo. Uma compra, contando a volta para Meus pedidos, faz quatro consultas globais e 2k + 2 gravações, sendo k o número de cafés diferentes no carrinho; acima do limite vem 429, que o `banco.py` espera e repete.
 - **Meus pedidos mostra os 50 mais recentes**, sem paginação.
 - **O banco confere o formato da referência, não a existência.** A `validate_doc_update` exige que `categoria_id` comece com `categoria:`, mas não sabe se a categoria existe. Quem garante é a aplicação — o checkout lê cada café antes de reservar.
 - **O histórico do pedido não é imutável no banco.** A `validate_doc_update` protege itens, cliente e cancelamento; as demais mudanças de status e o `historico` dependem da aplicação.
-- **Uma credencial para tudo.** O `init-db`, que cria o banco e os design documents, e a loja usam o mesmo `COUCHDB_URL`; não há equivalente ao usuário restrito `torra_app` do relacional.
+- **Um usuário da loja para todos os documentos.** Em produção, a loja entra com `torra_app`, que não grava design documents nem apaga o banco — o `admin` fica só na máquina de quem roda `init-db`. Mas o `torra_app` lê e grava qualquer documento do `torra_terra`: o CouchDB não dá permissão por tipo de documento. O que ele grava passa pela `validate_doc_update`, como tudo. Localmente, com o docker-compose, a loja usa o `admin`.

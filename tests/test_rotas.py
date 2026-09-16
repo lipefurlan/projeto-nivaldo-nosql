@@ -170,7 +170,7 @@ def test_compra_de_ponta_a_ponta(navegador, banco, cliente, catalogo):
 
 
 def test_meus_pedidos_mostra_o_pedido_recem_feito_mesmo_com_indice_atrasado(navegador, banco, cliente, catalogo, monkeypatch):
-    """No Cloudant a consulta ao índice pode ainda não ver o pedido novo."""
+    """Num cluster, como o Cloudant, o índice pode ainda não ver o pedido novo."""
     entrar(navegador)
     adicionar(navegador, "piata-altitude", 1)
     token = extrair_token(navegador.get("/checkout").get_data(as_text=True))
