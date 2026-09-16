@@ -16,6 +16,9 @@ param(
 $Pptx = (Resolve-Path $Pptx).Path
 $tolerancia = 1.5  # pontos
 
+# Se o PowerPoint já estiver aberto, o COM se conecta a ESSA instância — e
+# um Quit() no fim fecharia as apresentações de quem está usando a máquina.
+$jaEstavaAberto = [bool](Get-Process -Name POWERPNT -ErrorAction SilentlyContinue)
 $app = New-Object -ComObject PowerPoint.Application
 try {
   # Open(arquivo, ReadOnly, Untitled, WithWindow)
@@ -52,6 +55,6 @@ try {
   $apresentacao.Close()
 }
 finally {
-  $app.Quit()
+  if (-not $jaEstavaAberto) { $app.Quit() }
   [System.Runtime.InteropServices.Marshal]::ReleaseComObject($app) | Out-Null
 }

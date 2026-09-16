@@ -274,17 +274,17 @@ checkout vão do título do bloco até o título seguinte (comandos abaixo).
 
 | Medida | Relacional | NoSQL |
 |---|---|---|
-| Linhas de Python da aplicação | 891 (`app.py`) | 1.800 (`app.py` 1.330 + `banco.py` 470) |
+| Linhas de Python da aplicação | 891 (`app.py`) | 1.841 (`app.py` 1.371 + `banco.py` 470) |
 | Linhas do checkout | 122 (seção "A transacao de checkout") | 419: seções da saga e da reconciliação 335; `atualizar` e `atualizar_varios` 84 |
 | Idas ao banco numa compra sem conflito | Não medido; só o `SELECT ... FOR UPDATE` já é um comando por linha do carrinho | 7 na saga e 8 no clique em Confirmar (a rota relê o carrinho antes), com 1 café ou com 3, contadas no dublê |
 | Regras no banco | `schema.sql`, 193 linhas: 11 `CHECK`, 3 `UNIQUE`, 4 `FOREIGN KEY` | `validacao.js`, 174 linhas: 35 chamadas a `exigir` |
 | Índices | 4 `CREATE INDEX` | 4 índices Mango |
-| Funções de teste | 22 (`test_checkout` 12, `test_seguranca` 10) | 90 (`test_validacao` 24, `test_checkout` 23, `test_rotas` 22, `test_seguranca` 11, `test_banco` 10) |
-| Linhas em `tests/` | 585 | 2.096, das quais 402 do dublê `couchdb_falso.py` |
+| Funções de teste | 22 (`test_checkout` 12, `test_seguranca` 10) | 92 (`test_validacao` 24, `test_checkout` 23, `test_rotas` 22, `test_seguranca` 13, `test_banco` 10) |
+| Linhas em `tests/` | 585 | 2.130, das quais 402 do dublê `couchdb_falso.py` |
 | Dependências em `requirements.txt` | 7 | 3, e `pytest` em `requirements-dev.txt` |
 | Comandos `flask` | 3: `init-db`, `seed-db`, `reset-db` | 4: os mesmos e `reconciliar` |
 
-Suíte NoSQL rodada localmente, sem `TEST_COUCHDB_URL`: 107 casos coletados, 92
+Suíte NoSQL rodada localmente, sem `TEST_COUCHDB_URL`: 109 casos coletados, 94
 passaram e 15 foram pulados — os da `validate_doc_update`, que exigem CouchDB de
 verdade. É o resultado do dublê em memória, não do CI. A suíte relacional não
 foi rodada para este documento, porque exige PostgreSQL.

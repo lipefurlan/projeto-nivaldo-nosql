@@ -216,7 +216,7 @@
           [
             [
               "pytest",
-              "107 testes"
+              "109 testes"
             ],
             [
               "GitHub Actions",
@@ -493,7 +493,7 @@
       "titulo": "O projeto em números",
       "numeros": [
         [
-          "107",
+          "109",
           "testes",
           "todos passando no CouchDB de verdade"
         ],
@@ -537,7 +537,7 @@
     {
       "chave": "demonstracao",
       "titulo": "Demonstração",
-      "url": "[PREENCHER: endereço da loja no Vercel]",
+      "url": "projeto-nivaldo-nosql.vercel.app",
       "passos": [
         "Catálogo e filtro por região",
         "Escolher café e moagem — a moagem vai para o item do pedido",

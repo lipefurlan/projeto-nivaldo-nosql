@@ -370,7 +370,9 @@ async function gerar() {
   texto(s, zap.numero, { x: 9.45, y: 5.8, w: 2.93, h: 0.32, fontSize: 13.5, bold: true, color: ACC, align: "center" });
   pagina(s, 12, true); s.addNotes(d.notas);
 
-  const destino = path.join(PUBLICO, `${deck.arquivo}.pptx`);
+  // Um destino alternativo pode vir como argumento: útil quando o .pptx
+  // publicado está aberto no PowerPoint e o Windows não deixa sobrescrever.
+  const destino = process.argv[2] ? path.resolve(process.argv[2]) : path.join(PUBLICO, `${deck.arquivo}.pptx`);
   await p.writeFile({ fileName: destino });
   const semCompressao = fs.statSync(destino).size;
 
