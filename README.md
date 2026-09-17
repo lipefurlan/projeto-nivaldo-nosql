@@ -7,8 +7,11 @@ Prof. Nivaldo T. Marcusso.
 
 [![testes](https://github.com/lipefurlan/projeto-nivaldo-nosql/actions/workflows/testes.yml/badge.svg)](https://github.com/lipefurlan/projeto-nivaldo-nosql/actions/workflows/testes.yml)
 
-**No ar:** [projeto-nivaldo-nosql.vercel.app](https://projeto-nivaldo-nosql.vercel.app) ·
-apresentação em [`/apresentacao`](https://projeto-nivaldo-nosql.vercel.app/apresentacao)
+**No ar:** [projeto-nivaldo-nosql.vercel.app](https://projeto-nivaldo-nosql.vercel.app)
+
+**Apresentação:** [PDF](public/static/Torra_e_Terra_NoSQL.pdf) ·
+[PowerPoint](public/static/Torra_e_Terra_NoSQL.pptx) ·
+[versão web](https://projeto-nivaldo-nosql.vercel.app/apresentacao)
 
 É a mesma loja do projeto relacional, agora sobre um banco de documentos. O
 objetivo é o do material: **comparar na prática o ciclo de uma aplicação
